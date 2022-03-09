@@ -1,0 +1,9 @@
+image: "python:latest"
+
+stages:
+  - testing
+
+run_static:
+  
+run_tests:
+  
