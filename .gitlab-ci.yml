@@ -15,8 +15,10 @@ run_tests:
   before_script:
     - pip install pytest pytest-cov
   script:
-    - python3 -m pytest --cov-report=html --cov=src .
+    - python3 -m pytest --junitxml=report.xml --cov-report=html --cov=src .
   artifacts:
     paths: 
       - coverage
     expire_in: 30 days
+    reports:
+      junit: report.xml
