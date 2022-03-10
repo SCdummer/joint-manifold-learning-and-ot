@@ -1,4 +1,4 @@
-def test_addition:
+def test_addition():
     x = 2
     y = 3
     z = x + y
