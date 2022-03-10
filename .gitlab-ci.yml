@@ -10,6 +10,8 @@ run_static:
   script:
     - pylint src/
     - flake8 src --statistics --count  
+    - pylint tests/
+    - flake8 tests --statistics --count  
 
 run_tests:
   stage: testing
