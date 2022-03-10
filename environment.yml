@@ -1,0 +1,7 @@
+name: machine-learning-env
+
+channels:
+  - defaults
+
+dependencies: 
+  - jupyter
