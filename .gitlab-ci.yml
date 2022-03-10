@@ -16,3 +16,7 @@ run_tests:
     - pip install pytest pytest-cov
   script:
     - python3 -m pytest --cov-report=html --cov=src .
+  artifacts:
+    paths: 
+      - coverage
+    expire_in: 30 days
