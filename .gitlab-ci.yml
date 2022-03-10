@@ -6,10 +6,11 @@ stages:
 run_static:
   stage: testing
   before_script:
-    - pip install pylint
+    - pip install pylint flake8
   script:
     - pylint src/
-  
+    - flake8 src --statistics --count  
+
 run_tests:
   stage: testing
   before_script:
