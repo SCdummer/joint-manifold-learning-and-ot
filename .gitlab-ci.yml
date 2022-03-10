@@ -4,6 +4,15 @@ stages:
   - testing
 
 run_static:
+  stage: testing
+  before_script:
+    - pip install pylint
+  script:
+    - pylint src/
   
 run_tests:
-  
+  stage: testing
+  before_script:
+    - pip install pytest pytest-cov
+  script:
+    - python3 -m pytest --cov-report=html --cov=src .
