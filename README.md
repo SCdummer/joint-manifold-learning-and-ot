@@ -40,18 +40,19 @@ When you create a new project, select this as template to use. You can do that b
 
 
 ## FAQ
- 1. I have a question about this template. Who do I ask?
- 
-Ask Tjeerd Jan Heeringa, PhDer with office Zi3006.
-
- 2. What are these `.gitkeep` files?
+ 1. What are these `.gitkeep` files?
 
 The template enforces some folder structure. However, git does not care about folders, only about files. So to make sure that git recognizes the folders, a `.gitkeep` is added. Do not remove them. It will confuse git.
 
- 3. What files does git ignore by default and which not?
+ 2. What files does git ignore by default and which not?
 
-If you place some file into `data/raw`, `data/processed` or `data/temp`, then git will ignore them. Please do not the `.gitkeep` files in them. Other files created by editors like PyCharm or created when making a virtual env are ignored as well. Most other files are not ignored, and will be committed if you add them to your commits. 
+If you place some file into `data/raw`, `data/processed` or `data/temp`, then git will ignore them. Please do not remove the `.gitkeep` files in them. Other files created by editors like PyCharm or created when making a virtual env are ignored as well. Most other files are not ignored, and will be committed if you add them to your commits. 
 
- 4. I see no `requirements.txt`. Where is it?
+ 3. I see no `requirements.txt`. Where is it?
 
 When you work with the package `virtualenv` you use a `requirements.txt` to store you packages. This template assumes that people work with Anaconda. The equivalent to `requirements.txt` for Anaconda is `environment.yml`. If you want to use `virtualenv` and not Anaconda, install the packages from `environment.yml` manually.
+
+ 4. I have a question about this template that is not listed in this FAQ. Who do I ask?
+ 
+Ask Tjeerd Jan Heeringa, PhDer with office Zi3006.
+
