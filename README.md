@@ -41,4 +41,5 @@ When you create a new project, select this as template to use. You can do that b
 
 ## FAQ
  1. I have a question about this template. Who do I ask?
- Ask Tjeerd Jan Heeringa, PhDer with office Zi3006.
+ 
+Ask Tjeerd Jan Heeringa, PhDer with office Zi3006.
