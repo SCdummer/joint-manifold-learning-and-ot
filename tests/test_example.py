@@ -1,4 +1,6 @@
-"""This is an example of how you would write a test. Typically the tested function, in this case 'addition' is imported from another file. """
+"""This is an example of how you would write a test. Typically the tested function, 
+in this case 'addition', is imported from another file. 
+"""
 
 def addition(x, y):
     """Adds the input parameters
@@ -16,4 +18,3 @@ def test_addition_positive():
     y = 3
     z = addition(x,y)
     assert ( z == 5 ), "Some useful error message"
-
