@@ -8,3 +8,5 @@ dependencies:
   - jupyter
   - pylint
   - autopep8
+  - pytest
+  - pytest-cov
