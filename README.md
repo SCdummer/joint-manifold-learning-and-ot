@@ -5,11 +5,11 @@ This is a template for new MIA projects. Using this ensures consistency within t
 ## How to use this template
 
 When you create a new project, select this as template to use. You can do that by
- -> Click on `Create new project`  
- -> Click on `Create from template`
- -> Select the `Group` tab, listed next to the `Built-in` and `Instance` tabs
- -> Unfold `Mathematical Imaging and AI/Templates` 
- -> Click on `Use template` next to this `Machine Learning - Python` template
+ 1. Click on `Create new project`  
+ 2. Click on `Create from template`
+ 3. Select the `Group` tab, listed next to the `Built-in` and `Instance` tabs
+ 4. Unfold `Mathematical Imaging and AI/Templates` 
+ 5. Click on `Use template` next to this `Machine Learning - Python` template
 
 ## Meaning of the files and folders
 
