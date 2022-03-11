@@ -2,6 +2,9 @@ name: machine-learning-env
 
 channels:
   - defaults
+  - conda-forge
 
 dependencies: 
   - jupyter
+  - pylint
+  - autopep8
