@@ -22,7 +22,7 @@ run_tests:
   stage: testing
   before_script:
     - conda env create -f environment.yml -n test
-    - conda activate test
+    - source activate test
   script:
     - python3 -m pytest --junitxml=report.xml --cov-report=html --cov=src .
   artifacts:
