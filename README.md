@@ -16,9 +16,6 @@ When you create a new project, select this as template to use. You can do that b
 | folder/file     | usage |
 | ---             | ---   |
 | data            | Holds all the data you use; unless it is really little data, *DO NOT* commit the data.
-| data/raw        | Place to place the raw data. This is the data that you are given, and should not be changed afterwards.
-| data/processed  | Place to stored the processed/transformed data. 
-| data/temp       | Place to store data when you need a place to store it whilst going from raw data to processed data.
 | models          | Place to store your pretrained models.
 | notebooks       | Place to store your Jupyter notebooks.
 | results         | Place to store the images you produce, notebooks that you export to html and other results.
@@ -46,7 +43,7 @@ The template enforces some folder structure. However, git does not care about fo
 
  2. What files does git ignore by default and which not?
 
-If you place some file into `data/raw`, `data/processed` or `data/temp`, then git will ignore them. Please do not remove the `.gitkeep` files in them. Other files created by editors like PyCharm or created when making a virtual env are ignored as well. Most other files are not ignored, and will be committed if you add them to your commits. 
+If you place some file into `data`, then git will ignore them. Please do not remove the `.gitkeep` file in it. Other files created by editors like PyCharm or created when making a virtual env are ignored as well. Most other files are not ignored, and will be committed if you add them to your commits. 
 
  3. I see no `requirements.txt`. Where is it?
 
