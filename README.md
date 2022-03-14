@@ -11,6 +11,8 @@ When you create a new project, select this as template to use. You can do that b
  4. Unfold `Mathematical Imaging and AI/Templates` 
  5. Click on `Use template` next to this `Machine Learning - Python` template
 
+After you have created a project using this template, go to the issues (see sidebar) and do what is written in the first issue.
+
 ## Meaning of the files and folders
 
 | folder/file     | usage |
