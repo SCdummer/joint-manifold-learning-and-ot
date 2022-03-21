@@ -1,9 +1,18 @@
 stages:
+  - static
   - testing
+
+run_static_black:
+  image: python:latest
+  stage: static
+  before_script:
+    - pip install black
+  script:
+    - black src tests --check --verbose --diff
 
 run_static_pylint:
   image: python:latest
-  stage: testing
+  stage: static
   before_script:
     - pip install pylint
   script:
@@ -11,7 +20,7 @@ run_static_pylint:
 
 run_static_flake8:
   image: "python:latest"
-  stage: testing
+  stage: static
   before_script:
     - pip install flake8
   script:

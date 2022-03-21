@@ -7,6 +7,8 @@ channels:
 dependencies: 
   - jupyter
   - pylint
+  - flake8
+  - black
   - autopep8
   - pytest
   - pytest-cov
