@@ -17,4 +17,4 @@ def test_addition_positive():
     x = 2
     y = 3
     z = addition(x, y)
-    assert (z == 5), "Some useful error message"
+    assert z == 5, "Some useful error message"
