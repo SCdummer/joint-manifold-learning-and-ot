@@ -4,13 +4,13 @@ channels:
   - defaults
   - conda-forge
 
-dependencies: 
-  - jupyter
-  - pylint
-  - flake8
-  - black
-  - autopep8
-  - pytest
-  - pytest-cov
+dependencies:
+  - python=3.9.7 
+  - pylint=2.12.2
+  - flake8=4.0.1
+  - black=19.10b0
+  - autopep8=1.6.0
+  - pytest=6.2.5
+  - pytest-cov=3.0.0
 
 channel_priority: strict
