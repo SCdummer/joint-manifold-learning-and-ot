@@ -12,3 +12,5 @@ dependencies:
   - autopep8
   - pytest
   - pytest-cov
+
+channel_priority: strict
