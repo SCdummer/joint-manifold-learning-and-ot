@@ -217,10 +217,11 @@ def process_tracks(data_dir):
                     os.makedirs(dirname)
                 img_obj.save(os.path.join(dirname, save_filename))
 
-    # Remove the tracks with fewer than 10 images
+    # Remove the tracks with fewer than a certain number of images
+    min_amount_time_points = 30
     for folder in os.listdir(save_dir):
 
-        if len(os.listdir(os.path.join(save_dir, folder))) < 10:
+        if len(os.listdir(os.path.join(save_dir, folder))) < min_amount_time_points:
             shutil.rmtree(os.path.join(save_dir, folder))
 
 
