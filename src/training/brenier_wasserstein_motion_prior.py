@@ -26,17 +26,20 @@ class BrenierW2Loss(_Loss):
         source = rearrange(source, "b c h w -> (b c) h w")
         target = rearrange(target, "b c h w -> (b c) h w")
 
-        # get non-zero indices of source and targets
-        source_nonzero = source.nonzero(as_tuple=True)
-        target_nonzero = target.nonzero(as_tuple=True)
-
         # get the coordinates of the non-zero indices as (B, N, 2)
-        source_coords = torch.stack([source_nonzero[1] / h, source_nonzero[2] / w], dim=-1)
-        target_coords = torch.stack([target_nonzero[1] / h, target_nonzero[2] / w], dim=-1)
+        source_coords = torch.stack(torch.meshgrid(
+            torch.arange(h, dtype=torch.float32, device=source.device),
+            torch.arange(w, dtype=torch.float32, device=source.device),
+            indexing='ij'
+        ), dim=-1).reshape(-1, 2)
+        source_coords = source_coords.unsqueeze(0).expand(source.shape[0], -1, -1)
+        source_coords.requires_grad_(True)
+
+        target_coords = source_coords.detach().clone()
 
         # get the weights of the non-zero indices as (B, N)
-        source_weights = source[source_nonzero]
-        target_weights = target[target_nonzero]
+        source_weights = rearrange(source, "b h w -> b (h w)")
+        target_weights = rearrange(target, "b h w -> b (h w)")
 
         source_weights = source_weights / source_weights.sum(dim=-1, keepdim=True)
         target_weights = target_weights / target_weights.sum(dim=-1, keepdim=True)
@@ -49,7 +52,7 @@ def create_circle(_translation, inner_rad=3., val=0.5):
     y, x = torch.meshgrid(
         torch.arange(32, dtype=torch.float32),
         torch.arange(32, dtype=torch.float32),
-        indexing='ij'
+        indexing='xy'
     )
     circle_inner = (x - 24 - _translation) ** 2 + (y - 24 - _translation) ** 2 <= inner_rad ** 2
     circle_outer = ((x - 24 - _translation) ** 2 + (y - 24 - _translation) ** 2 <= 3 ** 2) & (
@@ -76,6 +79,7 @@ if __name__ == "__main__":
     _source[8:24, 8:24] = 1
     _source = _source.unsqueeze(0).unsqueeze(0).cuda()
 
+    # _source = torch.rand(1, 1, 32, 32).cuda()
     _source.requires_grad_(True)
 
     # Test Case 3
@@ -94,11 +98,11 @@ if __name__ == "__main__":
     brenier = BrenierW2Loss()
     _loss = brenier(_source, _target)
 
-    [g] = torch.autograd.grad(_loss, [_source])
+    [_g] = torch.autograd.grad(_loss, _source, create_graph=True)
 
     # plot the gradient and the image
     _, axs = plt.subplots(1, 3, figsize=(15, 5))
-    axs[0].imshow(g.squeeze().detach().cpu().numpy())
+    axs[0].imshow(_g.squeeze().detach().cpu().numpy())
     axs[0].set_title("Gradient")
     axs[1].imshow(_source.squeeze().detach().cpu().numpy())
     axs[1].set_title("Source")
