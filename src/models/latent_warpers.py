@@ -1,5 +1,5 @@
 import torch.nn as nn
-from torchidffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint_adjoint as odeint
 
 
 class VecField(nn.Module): 
@@ -15,9 +15,9 @@ class VecField(nn.Module):
             self.layers.append(nn.ReLU())
             self.layers.append(nn.BatchNorm1d(hidden_dim))
 
-        self.layers.append(nn.Linear(hidden_dims[-1], 1))
+        self.layers.append(nn.Linear(hidden_dims[-1], input_dim))
 
-    def forward(self, z, t):
+    def forward(self, t, z):
         y = z
         for layer in self.layers:
             y = layer(y)
@@ -42,8 +42,5 @@ class NeuralODE(nn.Module):
 
     ### z-latent code, t-marching time, c-place holder for latent code of parameters
     def forward(self, z, t=None, c=None):
-        if self.adaptive:
-            return odeint(self.vel_field, z, t, method=self.ode_int_method)
-        else:
-            return odeint(self.vel_field, z, t, method=self.ode_int_method, step_size=self.step_size)
+        return odeint(self.vel_field, z, t, method=self.ode_int_method)
 

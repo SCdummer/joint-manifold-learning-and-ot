@@ -36,13 +36,13 @@ class Decoder(torch.nn.Module):
         self.output_layer = torch.nn.Sequential()
 
         # Deconvolutional layer
-        out = torch.nn.ConvTranspose2d(num_filters[i], 3, kernel_size=4, stride=2, padding=1)
+        out = torch.nn.ConvTranspose2d(num_filters[i], 1, kernel_size=4, stride=2, padding=1)
         self.output_layer.add_module('out', out)
         torch.nn.init.normal_(out.weight, mean=0.0, std=0.02)
         torch.nn.init.constant_(out.bias, 0.0)
 
         # Activation
-        self.output_layer.add_module('act', torch.nn.Tanh())
+        self.output_layer.add_module('act', torch.nn.Sigmoid())
 
     def forward(self, x):
         x = self.hidden_layer(x)

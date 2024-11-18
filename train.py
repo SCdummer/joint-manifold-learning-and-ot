@@ -10,6 +10,9 @@ import argparse
 import datetime
 import os
 import json
+from tqdm import trange
+
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 # Load the models
 from src.models.encoders import Encoder
@@ -26,8 +29,12 @@ from src.data.datasets import CellData
 # Load weights and biases for logging the training process
 import wandb
 
+# Import code for evaluating the model
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+
 # Define some loss functions
-recon_loss = nn.MSELoss()
+recon_loss = nn.MSELoss() # nn.BCELoss()
 wasserstein_dist = FastConvolutionalW2Cost()
 
 def create_code_snapshot(root, dst_path, extensions=(".py", ".json"), exclude=()):
@@ -120,31 +127,208 @@ def save_model_and_optimizer(experiment_directory, static_or_dynamic, epoch, enc
     save_model(experiment_directory, filename, time_warper, 'time_warper', static_or_dynamic, epoch)
     save_optimizer(experiment_directory, filename, optimizer, static_or_dynamic, epoch)
 
+def load_model(experiment_directory, model, model_name, static_or_dynamic, checkpoint_filename):
+
+    # Get the name of the file which is used to load the parameters
+    substring = "static" if static_or_dynamic == 'static' else "dynamic"
+    filename = os.path.join(experiment_directory, "ModelParameters", model_name, substring, checkpoint_filename)
+
+    if not os.path.isfile(filename):
+        raise Exception('model state dict "{}" does not exist'.format(filename))
+
+    # Load the parameters
+    data = torch.load(filename)
+
+    # Put the parameters into the model
+    model.load_state_dict(data["model_state_dict"])
+
+    # Return the epoch at which the model was saved
+    return data["epoch"]
+
+def load_optimizer(experiment_directory, optimizer, static_or_dynamic, checkpoint_filename, device):
+
+    # Get the filename of the file containing the optimizer parameters
+    substring = "static" if static_or_dynamic == 'static' else "dynamic"
+    filename = os.path.join(experiment_directory, "OptimizerParameters", substring, checkpoint_filename)
+
+    if not os.path.isfile(filename):
+        raise Exception('optimizer state dict "{}" does not exist'.format(filename))
+
+    # Load the parameters
+    data = torch.load(filename, map_location=device)
+
+    # Put the parameters into the optimizer
+    optimizer.load_state_dict(data["optimizer_state_dict"])
+
+    # Return the epoch at which the optimizer was saved
+    return data["epoch"]
+
+def create_time_series_gif(recon_tensor, gt_tensor, save_dir, recon_idx):
+
+    # Create a figure
+    fig, ax = plt.subplots(1, 2)
+
+    ### trajectory animation (gif)
+    def animate(i, recon_tensor, gt_tensor):
+        ax[0].clear()
+        ax[1].clear()
+        p1 = ax[0].imshow(recon_tensor[i].squeeze(), vmin=0, vmax=1)
+        p2 = ax[1].imshow(gt_tensor[i].squeeze(), vmin=0, vmax=1)
+        ax[0].set_title("Reconstruction at time point {}".format(i))
+        ax[1].set_title("Ground Truth at time point {}".format(i))
+        return p1, p2
+
+    gif = FuncAnimation(fig, animate, fargs=(recon_tensor, gt_tensor),
+                        blit=True, repeat=True, frames=gt_tensor.shape[0], interval=1)
+    gif.save(os.path.join(save_dir, "ReconstructionTimeSeries_{}.gif".format(recon_idx)), dpi=150, writer=PillowWriter(fps=5))
+    ax[0].clear()
+    ax[1].clear()
+
+    # Close the figures
+    plt.close('all')
+
+
+def change_model_mode(encoder, decoder, time_warper, new_mode):
+    """"
+    This code puts the models in training or evaluation mode
+    """
+    if new_mode == 'train':
+        encoder.train()
+        decoder.train()
+        time_warper.train()
+    elif new_mode == 'eval':
+        encoder.eval()
+        decoder.eval()
+        time_warper.eval()
+    else:
+        raise ValueError("Input 'new_mode' can only be 'train' or 'eval' and not {}...".format(new_mode))
+
+
+def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder, decoder, time_warper, dataloader,
+                                                  nabla_t, num_int_steps, epoch, device):
+
+    # Get a batch of the training data
+    time_series_batch = next(iter(dataloader))
+
+    # Change the mode of the models to evaluation
+    change_model_mode(encoder, decoder, time_warper, 'eval')
+
+    # Create a figure for each of the inputs and save it to the correct directory
+    for i, time_series in enumerate(time_series_batch):
+
+        # Put the time series on cuda
+        time_series = time_series.to(device)
+
+        # Get the initial image
+        image0 = time_series[0, ...][None, ...]
+
+        # Encode the initial image
+        z0 = encoder(image0)
+
+        # Get a latent time series
+        t = torch.linspace(0, (time_series.size(0) - 1) * nabla_t, (time_series.size(0) - 1) * num_int_steps + 1).to(device)
+        z_t = time_warper(z0.reshape(1, -1), t).reshape((time_series.size(0) - 1) * num_int_steps + 1, -1, z0.size(1), encoder.output_size[0], encoder.output_size[1])
+
+        # Get the points of reconstruction
+        z_t = z_t[::num_int_steps].squeeze()
+
+        # Get reconstructions of the time series
+        recon = decoder(z_t)
+
+        # Get the substring for saving the figure
+        substring = "dynamic"
+
+        # Create the save directory if it does not exist yet
+        save_dir = os.path.join(experiment_directory, "Figures", substring, str(epoch))
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
+        create_time_series_gif(recon.detach().cpu().numpy(), time_series.detach().cpu().numpy(), save_dir, i)
+
+    # Change the mode of the models back to train
+    change_model_mode(encoder, decoder, time_warper, 'train')
+
+def evaluate_random_static_train_reconstructions(experiment_directory, encoder, decoder, dataloader, epoch, device, num_samples=5):
+
+    # Get a batch of the training data
+    inputs = next(iter(dataloader)).to(device)
+
+    # Get some random number of samples
+    if inputs.size(0) > num_samples:
+        perm = torch.randperm(inputs.size(0))
+        idx = perm[:num_samples]
+        inputs = inputs[idx]
+
+    # Encode and decode them
+    z = encoder(inputs)
+    recon = decoder(z)
+
+    # Create a figure for each of the inputs and save it to the correct directory
+    for i in range(recon.size(0)):
+
+        # Generate a figure
+        fig, ax = plt.subplots(1, 2)
+        ax[0].imshow(inputs[i, ...].detach().cpu().numpy().squeeze())
+        ax[1].imshow(recon[i, ...].detach().cpu().numpy().squeeze())
+        ax[0].set_title("Ground truth")
+        ax[1].set_title("Reconstruction")
+
+        # Get the substring for saving the figure
+        substring = "static"
+
+        # Create the save directory if it does not exist yet
+        save_dir = os.path.join(experiment_directory, "Figures", substring, str(epoch))
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
+        fig.savefig(os.path.join(save_dir, "Reconstruction_{}.png".format(i)))
+
+def full_time_series_collate(batch):
+    return [torch.from_numpy(time_series) for time_series in batch]
+
 def train_model(experiment_directory):
+
+    # First, check if the experiment directory exists. If not, indicate this to the user
+    if not os.path.isdir(experiment_directory):
+        raise ValueError("The experiment directory {} does not exist! "
+                         "Please make sure you are pointing to a valid directory...".format(experiment_directory))
+
+    # Use cuda if cuda is available
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        device = 'cpu'
 
     # Indicate which experiment we are running
     logging.info("Running the experiment specified in the directory: " + experiment_directory)
 
-    # backup the current version of the code
-    now = datetime.datetime.now()
-    code_bk_path = os.path.join(
-        experiment_directory, 'code_bk_%s.tar.gz' % now.strftime('%Y_%m_%d_%H_%M_%S'))
-    create_code_snapshot('./', code_bk_path, extensions=('.py', '.json', '.cpp', '.cu', '.h', '.sh'),
-                         exclude=('examples', 'third-party', 'bin'))
+    # backup the current version of the code if there is not backup
+    backup_code = True
+    for object_in_folder in os.listdir(experiment_directory):
+        if object_in_folder.startswith("code_bk_"):
+            backup_code = False
+            break
+    if backup_code:
+        now = datetime.datetime.now()
+        code_bk_path = os.path.join(
+            experiment_directory, 'code_bk_%s.tar.gz' % now.strftime('%Y_%m_%d_%H_%M_%S'))
+        create_code_snapshot('./', code_bk_path, extensions=('.py', '.json', '.cpp', '.cu', '.h', '.sh'),
+                             exclude=('examples', 'third-party', 'bin'))
 
     # Load the specs.json file
     specs = load_experiment_specifications(experiment_directory)
 
     # Get the hyperparameters
-    num_epochs = specs['num_epochs']
+    num_epochs = specs['NumEpochs']
     lambda_dyn_reg = specs['lambda_dyn_reg']
-    delta_t = specs['delta_t']
-    batch_size = specs['batch_size']
-    latent_dim = specs['latent_dim']
-    init_lr = specs['init_lr']
+    h = specs['h']
+    nabla_t = specs["Nabla_t"]
+    batch_size = specs['BatchSize']
+    latent_dim = specs['LatentDim']
+    init_lr = specs['InitLR']
+    num_int_steps = specs['NumIntSteps']
+    time_subsampling = specs["TimeSubsampling"]
 
     # Get the parameters regarding to saving the models and the optimizers
-    save_freq_in_epochs = specs['save_freq']
+    save_freq_in_epochs = specs['SaveFreq']
 
     # Get the parameters for the encoder, decoder, and latent warper
     encoder_specs = specs['EncoderSpecs']
@@ -154,38 +338,65 @@ def train_model(experiment_directory):
     # Define the models
     encoder = Encoder(latent_dim, **encoder_specs)
     decoder = Decoder(latent_dim, **decoder_specs)
-    time_warper = NeuralODE(latent_dim, **time_warper_specs)
+    time_warper = NeuralODE(encoder.output_size[0] * encoder.output_size[1] * latent_dim, **time_warper_specs)
 
-    # Start up a weights and biases session
+    # Start up a weights and biases session if we want to use weights and biases
     wandb_dir = os.path.join(experiment_directory, "wandb")
     experiment_name = os.path.basename(experiment_directory)
     if not os.path.isdir(wandb_dir):
         os.makedirs(wandb_dir)
     else:
-        raise ValueError("Wandb directory already exists. Remove this directory if one wants to rerun the experiment...")
-    wandb.init(project="WassersteinPrior-based-4dImaging", dir=os.path.join(experiment_directory), config=specs,
-               notes="The experiment directory is: {}".format(experiment_name))
+        if specs["UseWandb"]:
+            raise ValueError("Wandb directory already exists. Remove this directory if one wants to rerun the experiment...")
+    if specs["UseWandb"]:
+        wandb.init(project="WassersteinPrior-based-4dImaging", dir=os.path.join(experiment_directory), config=specs,
+                   notes="The experiment directory is: {}".format(experiment_name))
+    else:
+        wandb.init(project="WassersteinPrior-based-4dImaging", dir=os.path.join(experiment_directory), config=specs,
+                   notes="The experiment directory is: {}".format(experiment_name), mode='disabled')
 
     # Create two datasets: a static one and a dynamic one
-    static_dataset = CellData(specs["data_source"], time_step=specs["time_step"], dynamic=False)
-    dynamic_dataset = CellData(specs["data_source"], time_step=specs["time_step"], dynamic=True)
+    static_dataset = CellData(specs["DataSource"], time_step=time_subsampling, dynamic=False, full_time_series=False)
+    dynamic_dataset = CellData(specs["DataSource"], time_step=time_subsampling, dynamic=True, full_time_series=False)
+    dynamic_dataset_test = CellData(specs["DataSource"], time_step=1, dynamic=True, full_time_series=True)
 
     # Create the dataloaders
     train_dataloader_static = DataLoader(static_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
     train_dataloader_dynamic = DataLoader(dynamic_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    test_dataloader_dynamic = DataLoader(dynamic_dataset_test, batch_size=5, shuffle=True, drop_last=True, collate_fn=full_time_series_collate)
 
     # Get the optimizer and the scheduler
     optimizer_all, scheduler = initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr)
+
+    # Put the models on the correct device
+    encoder.to(device)
+    decoder.to(device)
+    time_warper.to(device)
+
+    # In case we want to continue from the latest obtained model, properly initialize the weights of the neural networks
+    # and of the optimizers.
+    if specs["Continue"] and os.path.isdir(os.path.join(experiment_directory, "ModelParameters")):
+        load_model(experiment_directory, encoder, 'encoder', 'static', 'latest.pth')
+        load_model(experiment_directory, decoder, 'decoder', 'static', 'latest.pth')
+        start_epoch = load_optimizer(experiment_directory, optimizer_all, 'static', 'latest.pth', device)
+    else:
+        start_epoch = 0
 
     ######################################################################
     ### First, we only train the encoder and decoder on the image data ###
     ######################################################################
 
     # For every epoch, do ...
-    for epoch in range(num_epochs):
+    for epoch in trange(start_epoch, num_epochs, initial=start_epoch, total=num_epochs, desc="Number of epochs"):
 
         # Grab a batch
         for batch in train_dataloader_static:
+
+            # Reset the optimizer
+            optimizer_all.zero_grad()
+
+            # Put the batch to the correct device
+            batch = batch.to(device)
 
             # Encode
             z = encoder(batch)
@@ -201,15 +412,20 @@ def train_model(experiment_directory):
             optimizer_all.step()
 
             # Log the reconstruction loss to weights and biases
-            wandb.log({'recon_loss_static': recon_loss.item()})
+            wandb.log({'recon_loss_static': loss_recon.item()})
+
+        # Print the latest reconstruction loss
+        print("loss_recon = {:.9f}".format(loss_recon.item()))
 
         # Update the learning rate via the scheduler
         scheduler.step()
 
         # Save the model
-        if epoch % save_freq_in_epochs == 0:
+        if epoch % save_freq_in_epochs == 0 or epoch == num_epochs-1:
             save_model_and_optimizer(experiment_directory, 'static', epoch, encoder, decoder, time_warper,
                                      optimizer_all, filename='latest.pth')
+            evaluate_random_static_train_reconstructions(experiment_directory, encoder, decoder, train_dataloader_static, epoch,
+                                                  device)
 
     ########################################
     ### Now we train everything together ###
@@ -219,50 +435,67 @@ def train_model(experiment_directory):
     optimizer_all, scheduler = initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr)
 
     # For every epoch, do ...
-    for epoch in range(num_epochs):
+    start_epoch = 0
+    for epoch in trange(start_epoch, num_epochs, initial=start_epoch, total=num_epochs, desc="Number of epochs"):
 
         # Grab a batch
         for (img_1, img_2) in train_dataloader_dynamic:
+
+            # Reset the optimizer
+            optimizer_all.zero_grad()
+
+            # Put the images to the correct device
+            img_1 = img_1.to(device)
+            img_2 = img_2.to(device)
 
             # Encode
             z_start = encoder(img_1)
             z_end = encoder(img_2)
 
             # Latent dynamics
-            t = torch.tensor([[0.0, 0.5-delta_t/2, 0.5+delta_t/2, 1.0]]).expand(z_start.size(0), 1)
-            z_t = time_warper(z_start, t)
+            end_time = nabla_t * time_subsampling
+            # half_time = end_time / 2
+            # t = torch.cat([torch.linspace(0.0, half_time - h / 2, steps=num_int_steps),
+            #                torch.linspace(half_time + h / 2, end_time, steps=num_int_steps)]).to(device)
+            t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling + 1).to(device)
+            z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
+            # z_left = z_t[num_int_steps-1]
+            # z_right = z_t[num_int_steps]
+            z_dynamic_end = z_t[-1]
 
             # Decode everything
             img_1_recon = decoder(z_start)
             img_2_recon_static = decoder(z_end)
-            img_2_recon_dynamic = decoder(z_t)
+            img_2_recon_dynamic = decoder(z_dynamic_end)
 
-            # Decode
+            # Get the reconstruction loss
             loss_recon = recon_loss(img_1, img_1_recon) + recon_loss(img_2, img_2_recon_static) + recon_loss(img_2, img_2_recon_dynamic)
 
-            # Normalize the intermediate images for calculating the motion prior loss
-            ...
+            # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
+            loss_latent_recon = torch.sum((z_dynamic_end - z_end) ** 2) / (batch_size * latent_dim)
 
-            # Calculate the motion prior loss
-            loss_motion_prior = wasserstein_dist(..., ...) / delta_t
+            # TODO: Implement the OT motion loss prior
+            loss_motion_prior = torch.tensor(0.0, device=device)
 
             # Calculate the full loss
-            loss = loss_recon + lambda_dyn_reg * loss_motion_prior
+            loss = loss_recon + loss_latent_recon + lambda_dyn_reg * loss_motion_prior
 
             # Update the parameters
             loss.backward()
             optimizer_all.step()
 
             # Log the losses to weights and biases
-            wandb.log({'recon_loss_dynamic': recon_loss.item(), 'motion_prior_loss': loss_motion_prior.item()})
+            wandb.log({'recon_loss_dynamic': loss_recon.item(), 'motion_prior_loss': loss_motion_prior.item()})
 
         # Update the scheduler
         scheduler.step()
 
         # Save the model
-        if epoch % save_freq_in_epochs == 0:
+        if epoch % save_freq_in_epochs == 0 or epoch == num_epochs-1:
             save_model_and_optimizer(experiment_directory, 'dynamic', epoch, encoder, decoder, time_warper,
                                      optimizer_all, filename='latest.pth')
+            evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder, decoder, time_warper,
+                                                          test_dataloader_dynamic, nabla_t, num_int_steps, epoch, device)
 
 
 if __name__ == "__main__":
@@ -283,3 +516,54 @@ if __name__ == "__main__":
     args = arg_parser.parse_args()
 
     train_model(args.experiment_directory)
+
+# img_left_recon = decoder(z_left)
+# img_right_recon = decoder(z_right)
+
+# # Reconstruct all of the time points
+# recon_list = []
+# z_t = z_start[None, ...] * (1 - t[:, None, None, None, None]) + t[:, None, None, None, None] * z_end[None, ...]
+# for i in range(2*num_int_steps):
+#     z_i = z_t[i, 3, ...][None, ...]
+#     recon_list.append(decoder(z_i).squeeze().detach().cpu().numpy())
+#     plt.imshow(recon_list[-1])
+#     plt.show()
+#
+# # Normalize the intermediate images for calculating the motion prior loss
+# idx_1, idx_2 = 9, 10
+# img_test_1 = recon_list[idx_1] / recon_list[idx_1].sum()
+# img_test_2 =recon_list[idx_2] / recon_list[idx_2].sum()
+#
+# # Calculate the motion prior loss
+# wasserstein_dist = FastConvolutionalW2Cost(blur=0.00000005)
+# from geomloss import SamplesLoss
+#
+# xg, yg = np.meshgrid(
+#     np.arange(img_test_1.size(0)),
+#     np.arange(img_test_1.size(1)),
+#     indexing="xy",
+# )
+#
+# t_x = np.linspace(0, 1, 64)
+# t_y = np.linspace(0, 1, 80)
+# w_s = 64
+# h_s = 80
+# C_y = (t_x.view(w_s, 1) - (t_x.view(1, w_s))) ** 2
+# C_x = (t_y.view(h_s, 1) - (t_y.view(1, h_s))) ** 2
+#
+# import POT
+#
+# loss_val = POT.ot.emd2()
+#
+#
+#
+# wass_dist = SamplesLoss(loss='sinkhorn', p=2, blur=0.00000005)
+# loss_motion_prior = wasserstein_dist(torch.tensor(img_test_1, device=device)[None, None, ...], torch.tensor(img_test_2, device=device)[None, None, ...]) / h
+
+
+# # Normalize the intermediate images for calculating the motion prior loss
+# img_left_recon_normalized = img_left_recon / (img_left_recon.sum(dim=(1, 2, 3))[:, None, None, None])
+# img_right_recon_normalized = img_right_recon / (img_right_recon.sum(dim=(1, 2, 3))[:, None, None, None])
+#
+# # Calculate the motion prior loss
+# loss_motion_prior = wasserstein_dist(img_left_recon_normalized, img_right_recon_normalized) / h

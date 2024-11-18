@@ -1,0 +1,27 @@
+{
+  "DataSource" : "data/Fluo-N2DL-HeLa/01_processed",
+  "EncoderSpecs" : {
+    "num_filters": [512, 256, 128],
+    "img_dims": [1, 64, 80]
+  },
+  "DecoderSpecs" : {
+    "num_filters": [128, 256, 512]
+  },
+  "TimeWarperSpecs" : {
+    "hidden_dims": [64, 64, 64],
+    "ode_int_method": "euler",
+    "step_size": 0.05
+  },
+  "TimeSubsampling": 5,
+  "NumIntSteps": 10,
+  "Nabla_t": 0.1,
+  "NumEpochs": 500,
+  "BatchSize": 64,
+  "LatentDim": 100,
+  "InitLR": 5e-3,
+  "SaveFreq": 100,
+  "UseWandb": false,
+  "Continue": true,
+  "h": 0.01,
+  "lambda_dyn_reg": 10
+}

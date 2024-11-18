@@ -5,7 +5,7 @@ Used the DCGAN encoder from https://github.com/drorsimon/image_barycenters/blob/
 import torch
 
 class Encoder(torch.nn.Module):
-    def __init__(self, latent_dim, num_filters):
+    def __init__(self, latent_dim, num_filters, img_dims):
         super(Encoder, self).__init__()
 
         # Hidden layers
@@ -43,6 +43,12 @@ class Encoder(torch.nn.Module):
         torch.nn.init.constant_(out.bias, 0.0)
         # Activation
         self.output_layer.add_module('bn_out', torch.nn.BatchNorm2d(latent_dim))
+        self.input_size = img_dims
+        rand_input = torch.randn(img_dims)[None, ...]
+        self.output_size = self.return_output_size(rand_input)[-2:]
+
+    def return_output_size(self, rand_input):
+        return self.forward(rand_input).size()
 
     def forward(self, x):
         x = self.hidden_layer(x)

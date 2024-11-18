@@ -7,16 +7,21 @@ from PIL import Image
 
 
 class CellData(torch.utils.data.Dataset):
-    def __init__(self, data_dir, time_step=10, dynamic=True):
+    def __init__(self, data_dir, time_step=10, dynamic=True, full_time_series=False):
         super(CellData, self).__init__()
 
         # Save the inputs
         self.data_dir = data_dir
         self.time_step = time_step
         self.dynamic = dynamic
+        self.full_time_series = full_time_series
 
         # Define a dictionary that will contain the data
         self.data_dict = {}
+
+        # Save the maximum value of the images and the minimum value. This is used for normalization purposes.
+        self.max_val = -100000000000000
+        self.min_val = 100000000000000
 
         # Load all the data in a dictionary
         for folder in os.listdir(data_dir):
@@ -40,7 +45,14 @@ class CellData(torch.utils.data.Dataset):
                 if time + 1 == 1 or ((time+1) % time_step == 0):
 
                     # Load the image and add to the dictionary
-                    self.data_dict[track_id].append(np.array(Image.open(os.path.join(data_dir, folder, filename))))
+                    img = np.array(Image.open(os.path.join(data_dir, folder, filename)))
+                    if len(img.shape) == 2:
+                        img = img[np.newaxis, :, :]
+                    self.data_dict[track_id].append(img)
+
+                    # Update the maximum and minimum values
+                    self.max_val = max(self.max_val, img.max())
+                    self.min_val = min(self.min_val, img.min())
 
                 else:
                     continue
@@ -77,17 +89,28 @@ class CellData(torch.utils.data.Dataset):
         # Get the tracks that you have
         self.track_ids = list(self.data_dict.keys())
 
+        # Save the scaling factor induced by the calculated maximum and minimal values. This scales all images to
+        # the interval [0, 1].
+        self.scaling_factor = (1.0 / (self.max_val - self.min_val)).astype(np.float32)
+
     def __len__(self):
-        if self.dynamic:
-            return self.num_img_pairs
+        if self.full_time_series:
+            return len(self.track_ids)
         else:
-            return self.num_imgs
+            if self.dynamic:
+                return self.num_img_pairs
+            else:
+                return self.num_imgs
 
     def __getitem__(self, idx):
-        if self.dynamic:
-            track_id, img_idx_1, img_idx_2 = self.idx_to_track_id_time_pair[idx]
-            return (self.data_dict[track_id][img_idx_1], self.data_dict[track_id][img_idx_2])
+        if self.full_time_series:
+            return (np.stack(self.data_dict[self.track_ids[idx]], axis=0) - self.min_val) * self.scaling_factor
         else:
-            track_id, img_idx = self.idx_to_track_id_image[idx]
-            return self.data_dict[track_id][img_idx]
+            if self.dynamic:
+                track_id, img_idx_1, img_idx_2 = self.idx_to_track_id_time_pair[idx]
+                return (((self.data_dict[track_id][img_idx_1] - self.min_val) * self.scaling_factor),
+                        ((self.data_dict[track_id][img_idx_2] - self.min_val) * self.scaling_factor))
+            else:
+                track_id, img_idx = self.idx_to_track_id_image[idx]
+                return ( (self.data_dict[track_id][img_idx] - self.min_val) * self.scaling_factor)
 

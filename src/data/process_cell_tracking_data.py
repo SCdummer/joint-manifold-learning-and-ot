@@ -172,7 +172,7 @@ def process_tracks(data_dir):
                     mask_bbox = mask[b_lim_y:u_lim_y, b_lim_x:u_lim_x]
 
                     # Pad the image with and track mask until we have a specific size
-                    target_shape = (65, 40)
+                    target_shape = (64, 40)
                     img_in_bbox = np.pad(img_in_bbox, ((max(int((target_shape[0] - img_in_bbox.shape[0])/2), 0),
                                                      max(int((target_shape[0] - img_in_bbox.shape[0])/2), 0)),
                                                        (max(int((target_shape[1] - img_in_bbox.shape[1]) / 2), 0),
