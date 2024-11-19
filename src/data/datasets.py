@@ -33,7 +33,7 @@ class CellData(torch.utils.data.Dataset):
             self.data_dict[track_id] = []
 
             # Grab all the images
-            img_filenames = os.listdir(os.path.join(data_dir, folder))
+            img_filenames = sorted(os.listdir(os.path.join(data_dir, folder)))
 
             # Load the images and add them to the dictionary
             for filename in img_filenames:

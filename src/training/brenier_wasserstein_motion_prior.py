@@ -72,18 +72,18 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     # Test Case 1
-    # _source = create_circle(0, inner_rad=3, val=0.5).unsqueeze(0).cuda()
+    _source = create_circle(0, inner_rad=3, val=0.5).unsqueeze(0).cuda()
 
     # Test Case 2
-    _source = torch.zeros(32, 32)
-    _source[8:24, 8:24] = 1
-    _source = _source.unsqueeze(0).unsqueeze(0).cuda()
+    # _source = torch.zeros(32, 32)
+    # _source[8:24, 8:24] = 1
+    # _source = _source.unsqueeze(0).unsqueeze(0).cuda()
 
     # _source = torch.rand(1, 1, 32, 32).cuda()
     _source.requires_grad_(True)
 
     # Test Case 3
-    # _target = _source.detach().clone()
+    #_target = _source.detach().clone()
 
     # Test Case 1 and 2
     _target = create_circle(0, inner_rad=1.5, val=0.5).unsqueeze(0).cuda()

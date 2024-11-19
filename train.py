@@ -11,6 +11,7 @@ import datetime
 import os
 import json
 from tqdm import trange
+import warnings
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
@@ -134,7 +135,8 @@ def load_model(experiment_directory, model, model_name, static_or_dynamic, check
     filename = os.path.join(experiment_directory, "ModelParameters", model_name, substring, checkpoint_filename)
 
     if not os.path.isfile(filename):
-        raise Exception('model state dict "{}" does not exist'.format(filename))
+        warnings.warn('model state dict "{}" does not exist'.format(filename))
+        return 0
 
     # Load the parameters
     data = torch.load(filename)
@@ -152,7 +154,8 @@ def load_optimizer(experiment_directory, optimizer, static_or_dynamic, checkpoin
     filename = os.path.join(experiment_directory, "OptimizerParameters", substring, checkpoint_filename)
 
     if not os.path.isfile(filename):
-        raise Exception('optimizer state dict "{}" does not exist'.format(filename))
+        warnings.warn('model state dict "{}" does not exist'.format(filename))
+        return 0
 
     # Load the parameters
     data = torch.load(filename, map_location=device)
@@ -434,8 +437,16 @@ def train_model(experiment_directory):
     # We reinitialize the optimizers and schedulers
     optimizer_all, scheduler = initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr)
 
+    # In case we want to continue from the latest obtained model, properly initialize the weights of the neural networks
+    # and of the optimizers.
+    if specs["Continue"] and os.path.isdir(os.path.join(experiment_directory, "ModelParameters")):
+        load_model(experiment_directory, encoder, 'encoder', 'dynamic', 'latest.pth')
+        load_model(experiment_directory, decoder, 'decoder', 'dynamic', 'latest.pth')
+        start_epoch = load_optimizer(experiment_directory, optimizer_all, 'dynamic', 'latest.pth', device)
+    else:
+        start_epoch = 0
+
     # For every epoch, do ...
-    start_epoch = 0
     for epoch in trange(start_epoch, num_epochs, initial=start_epoch, total=num_epochs, desc="Number of epochs"):
 
         # Grab a batch
