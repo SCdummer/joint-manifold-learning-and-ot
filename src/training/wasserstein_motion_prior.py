@@ -105,13 +105,12 @@ def batched_convol_bary_debiased(
     with torch.no_grad():
         log_batch = torch.log(batch + stab_thresh)
         log_batch = rearrange(log_batch, 'm b c h w -> (m b) c h w')
-        log_img_s = pyramid(log_batch, height=min(log_batch.shape[-2:]))[3:]
+        log_img_s = pyramid(log_batch, height=min(log_batch.shape[-2:]))[-2:]  # consider only the last two scales
         log_img_s = [rearrange(log_img, '(m b) c h w -> m b c h w', m=nh, b=b) for log_img in log_img_s]
 
         _, b, c, h0, w0 = parse_shape(log_img_s[0], 'm b c h w').values()
         db = torch.zeros((b, c, h0, w0), dtype=log_batch.dtype, device=log_batch.device)
-        g = torch.zeros(*log_img_s[0].shape, dtype=log_batch.dtype, device=log_batch.device,
-                        requires_grad=batch.requires_grad)
+        g = log_img_s[0]
 
         def convol_img(_log_img, _kernel_x, _kernel_y=None):
             if _kernel_y is None:
@@ -128,8 +127,7 @@ def batched_convol_bary_debiased(
                 _log_img = (_log_img + _kernel_y).logsumexp(dim=2)
                 return rearrange(_log_img, '(m b c h) w () -> m b c h w', m=_nh, b=b, c=c, h=h_s, w=w_s)
             else:
-                _log_img = torch.logsumexp(_kernel_x[None, None, None, :, :, None] + _log_img[:, :, :, None, ...],
-                                           dim=-2)
+                _log_img = torch.logsumexp(_kernel_x[None, None, None, :, :, None] + _log_img[:, :, :, None, ...], dim=-2)
                 _log_img = torch.logsumexp(
                     _kernel_y[None, None, None, :, :, None] + _log_img[:, :, :, None, ...].permute(0, 1, 2, 3, -1, -2),
                     dim=-2
@@ -153,7 +151,7 @@ def batched_convol_bary_debiased(
             for eps in eps_list:
                 m_x = C_x / eps
                 m_y = C_y / eps
-                for _ in range(1 + (s == len(log_img_s) - 1)):  # do the last iteration twice
+                for _ in range(1 + 4 * (s == len(log_img_s) - 1)):  # do only the last iteration 5 times
                     f = log_img - convol_img(g, m_x, m_y)
                     log_ku = convol_img(f, m_x, m_y)
                     log_bar = db + torch.sum(weights * log_ku, dim=0)
@@ -184,13 +182,13 @@ def batched_convol_bary_debiased(
 
     if return_cost:
         dist = batch / batch.sum(dim=(2, 3, 4), keepdim=True)
-        return torch.exp(log_bar), - torch.reshape((f[1] * dist[0] + g[1] * dist[1]), (b, -1)).mean(dim=1)
+        return torch.exp(log_bar), torch.reshape((f[0] * dist[0] + g[0] * dist[1]), (b, -1)).mean(dim=1)
     else:
         return torch.exp(log_bar)
 
 
 class FastConvolutionalW2Cost(_Loss):
-    def __init__(self, reduction='mean', scaling=0.9, use_pykeops=False):
+    def __init__(self, reduction='mean', scaling=0.95, use_pykeops=False):
         super(FastConvolutionalW2Cost, self).__init__(reduction=reduction)
         self.scaling = scaling
         self.use_pykeops = use_pykeops
@@ -209,7 +207,7 @@ class FastConvolutionalW2Cost(_Loss):
             return image, cost
 
 
-def create_circle(_translation, inner_rad=3, val=0.5):
+def create_circle(_translation, inner_rad=3., val=0.5):
     _image_of_circle = torch.zeros(32, 32)
     _y, _x = torch.meshgrid(
         torch.arange(32, dtype=torch.float32),
@@ -234,50 +232,70 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     # generate an image of a square
-    _image_of_square = torch.zeros(32, 32)
-    # _image_of_square = torch.rand(32, 32)
-    _image_of_square[8:24, 8:24] = 1
-    _image_of_square = _image_of_square.unsqueeze(0)
+    # _image_of_square = torch.zeros(32, 32)
+    # # _image_of_square = torch.rand(32, 32)
+    # _image_of_square[8:24, 8:24] = 1
+    # _image_of_square = _image_of_square.unsqueeze(0)
+    _image_of_square = create_circle(0, inner_rad=3, val=0.5)
+    _image_of_square = _image_of_square / torch.sum(_image_of_square, dim=(-1, -2), keepdim=True)
 
-    _image_of_circle = create_circle(0, inner_rad=3, val=0.5)
+    # # generate an image of a circle
+    # _image_of_circle = torch.zeros(32, 32)
+    # _y, _x = torch.meshgrid(
+    #     torch.arange(32, dtype=torch.float32),
+    #     torch.arange(32, dtype=torch.float32),
+    #     indexing='ij'
+    # )
+    # _circle = (_x - 24) ** 2 + (_y - 24) ** 2 <= 3 ** 2
+    # _image_of_circle[_circle] = 1
+    # _circle = (_x - 8) ** 2 + (_y - 8) ** 2 <= 3 ** 2
+    # _image_of_circle[_circle] = 1
+    #
+    # _image_of_circle = _image_of_circle.unsqueeze(0)
 
-    # show the images
-    _, axes = plt.subplots(1, 2)
-    axes[0].imshow(_image_of_square.cpu().numpy().transpose(1, 2, 0), cmap='gray')
-    axes[1].imshow(_image_of_circle.cpu().numpy().transpose(1, 2, 0), cmap='gray')
-    plt.tight_layout()
-    plt.show()
+    _image_of_circle = create_circle(2, inner_rad=3., val=0.5)
+    _image_of_circle = _image_of_circle / torch.sum(_image_of_circle, dim=(-1, -2), keepdim=True)
 
-    # stack the images
-    # _source = torch.rand(2, 1, 32, 32, dtype=torch.float32, device='cuda')
-    _source = torch.cat([_image_of_square.unsqueeze(0), _image_of_circle.unsqueeze(0)], dim=0).cuda()
+    # # show the images
+    # _, axes = plt.subplots(1, 2)
+    # axes[0].imshow(_image_of_square.cpu().numpy().transpose(1, 2, 0), cmap='gray')
+    # axes[1].imshow(_image_of_circle.cpu().numpy().transpose(1, 2, 0), cmap='gray')
+    # plt.tight_layout()
+    # plt.show()
+
+    # # stack the images
+    # # _source = torch.rand(2, 1, 32, 32, dtype=torch.float32, device='cuda')
+    # _source = torch.cat([_image_of_square.unsqueeze(0), _image_of_circle.unsqueeze(0)], dim=0).cuda()
+    # _source.requires_grad_(True)
+    # _target = torch.cat([_image_of_circle.unsqueeze(0), create_circle(0, inner_rad=1.5, val=0.5).unsqueeze(0)], dim=0).cuda()
+
+    _source = _image_of_square.unsqueeze(0).cuda()
     _source.requires_grad_(True)
+    _target = _image_of_circle.unsqueeze(0).cuda()
 
     _loss = FastConvolutionalW2Cost(scaling=0.9, reduction='none')
 
-    _target = torch.cat([_image_of_square.unsqueeze(0), create_circle(0, inner_rad=1.5, val=0.5).unsqueeze(0)], dim=0).cuda()
     _image, _cost = _loss(_source, _target)
 
-    # plot the images
-    _, axes = plt.subplots(1, 2)
-    axes[0].imshow(_image[0].detach().cpu().numpy().transpose(1, 2, 0))
-    axes[1].imshow(_image[1].detach().cpu().numpy().transpose(1, 2, 0))
-    plt.tight_layout()
-    plt.show()
-
     print(_cost)
+    [_g] = torch.autograd.grad(_cost.mean(), _source, retain_graph=False)
 
-    [gi] = torch.autograd.grad(_cost.mean(), _source, retain_graph=False)
+    print(_g.shape)
 
-    _, ax = plt.subplots(1, 2, figsize=(15, 5))
-    # compute the direction of descent at each point in the gi
-    ax[0].set_title(f'{_cost[0].item():.2f}')
-    ax[0].imshow(gi[0].detach().cpu().numpy().transpose(1, 2, 0))
-    ax[0].axis('off')
-    ax[1].set_title(f'{_cost[1].item():.2f}')
-    ax[1].imshow(gi[1].detach().cpu().numpy().transpose(1, 2, 0))
-    ax[1].axis('off')
+    # plot the gradient and the image
+    _, axs = plt.subplots(1, 4, figsize=(15, 5))
+    axs[0].imshow(_g.squeeze().detach().cpu().numpy())
+    axs[0].set_title("Gradient")
+    axs[1].imshow(_source.squeeze().detach().cpu().numpy())
+    axs[1].set_title("Source")
+    axs[2].imshow(_target.squeeze().cpu().numpy())
+    axs[2].set_title("Target")
+    axs[3].imshow(_image.squeeze().detach().cpu().numpy())
+    axs[3].set_title("Computed Image")
+    plt.tight_layout()
 
+    # set the main title as the cost
+    plt.suptitle(f"Cost: {_cost.item():.6f}")
     plt.tight_layout()
     plt.show()
 
