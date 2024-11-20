@@ -67,7 +67,8 @@ def epsilon_schedule(p, diameter, blur, scaling):
 
 
 def batched_convol_bary_debiased(
-        batch, scaling=0.9, weights=None, stab_thresh=1e-30, use_pykeops=False, return_cost=False, need_diffable=False
+        batch, scaling=0.95, weights=None, stab_thresh=1e-30, use_pykeops=False, return_cost=False, need_diffable=False,
+        n_per_eps=1, n_extra_last_scale=4
 ):
     """
     computes the batched convolutional barycenter2d debiased in the log domain.
@@ -109,8 +110,14 @@ def batched_convol_bary_debiased(
         log_img_s = [rearrange(log_img, '(m b) c h w -> m b c h w', m=nh, b=b) for log_img in log_img_s]
 
         _, b, c, h0, w0 = parse_shape(log_img_s[0], 'm b c h w').values()
+
+        db_aa = torch.zeros((b, c, h0, w0), dtype=log_batch.dtype, device=log_batch.device)
         db = torch.zeros((b, c, h0, w0), dtype=log_batch.dtype, device=log_batch.device)
-        g = log_img_s[0]
+        db_bb = torch.zeros((b, c, h0, w0), dtype=log_batch.dtype, device=log_batch.device)
+
+        g_aa = log_img_s[0][0]
+        g_ba = log_img_s[0]
+        g_bb = log_img_s[0][1]
 
         def convol_img(_log_img, _kernel_x, _kernel_y=None):
             if _kernel_y is None:
@@ -139,65 +146,94 @@ def batched_convol_bary_debiased(
             t_x = torch.linspace(0, 1, w_s, dtype=batch.dtype, device=batch.device)
             t_y = torch.linspace(0, 1, h_s, dtype=batch.dtype, device=batch.device)
             if use_pykeops:
-                C_y = - (LazyTensor(t_x.view(1, w_s, 1, 1)) - LazyTensor(t_x.view(1, 1, w_s, 1))) ** 2
-                C_x = - (LazyTensor(t_y.view(1, h_s, 1, 1)) - LazyTensor(t_y.view(1, 1, h_s, 1))) ** 2
+                C_y = - (LazyTensor(t_x.view(1, w_s, 1, 1)) - LazyTensor(t_x.view(1, 1, w_s, 1))) ** 2 / 2
+                C_x = - (LazyTensor(t_y.view(1, h_s, 1, 1)) - LazyTensor(t_y.view(1, 1, h_s, 1))) ** 2 / 2
             else:
-                C_y = - (t_x.view(w_s, 1) - (t_x.view(1, w_s))) ** 2
-                C_x = - (t_y.view(h_s, 1) - (t_y.view(1, h_s))) ** 2
+                C_y = - (t_x.view(w_s, 1) - (t_x.view(1, w_s))) ** 2 / 2
+                C_x = - (t_y.view(h_s, 1) - (t_y.view(1, h_s))) ** 2 / 2
 
             eps_list = epsilon_schedule(2, 2 / max(w_s, h_s), 1 / max(h_s, w_s), scaling)
-            # print(n, len(eps_list), eps_list[0], eps_list[-1])
+            # print(h_s, w_s, len(eps_list), eps_list[0], eps_list[-1])
 
             for eps in eps_list:
                 m_x = C_x / eps
                 m_y = C_y / eps
-                for _ in range(1 + 4 * (s == len(log_img_s) - 1)):  # do only the last iteration 5 times
-                    f = log_img - convol_img(g, m_x, m_y)
-                    log_ku = convol_img(f, m_x, m_y)
+                for _ in range(n_per_eps + n_extra_last_scale * (s == len(log_img_s) - 1 and eps == eps_list[-1])):  # do only the last iteration 5 times
+                    f_aa = log_img[0] - convol_img(g_aa[None], m_x, m_y)[0]
+                    log_ku = convol_img(f_aa[None], m_x, m_y)[0]
+                    log_bar_aa = db_aa + log_ku
+                    db_aa = 0.5 * (db_aa + log_bar_aa - convol_img(db_aa[None], m_x, m_y)[0])
+                    g_aa = log_bar_aa - log_ku
+
+                    f_bb = log_img[1] - convol_img(g_bb[None], m_x, m_y)[0]
+                    log_ku = convol_img(f_bb[None], m_x, m_y)[0]
+                    log_bar_bb = db_bb + log_ku
+                    db_bb = 0.5 * (db_bb + log_bar_bb - convol_img(db_bb[None], m_x, m_y)[0])
+                    g_bb = log_bar_bb - log_ku
+
+                    f_ab = log_img - convol_img(g_ba, m_x, m_y)
+                    log_ku = convol_img(f_ab, m_x, m_y)
                     log_bar = db + torch.sum(weights * log_ku, dim=0)
-
                     db = 0.5 * (db + log_bar - convol_img(db[None], m_x, m_y)[0])
-
-                    g = log_bar[None, ...] - log_ku
+                    g_ba = log_bar[None, ...] - log_ku
 
             # if not the last scale
             if s != len(log_img_s) - 1:
                 # upscale log_bar, c and g
+                db_aa = interpolate(db_aa, scale_factor=2, mode='bilinear', align_corners=False)
                 db = interpolate(db, scale_factor=2, mode='bilinear', align_corners=False)
-                g = rearrange(
+                db_bb = interpolate(db_bb, scale_factor=2, mode='bilinear', align_corners=False)
+                g_ba = rearrange(
                     interpolate(
-                        rearrange(g, 'm b c h w -> (m b) c h w'),
+                        rearrange(g_ba, 'm b c h w -> (m b) c h w'),
                         scale_factor=2, mode='bilinear', align_corners=False
                     ),
                     '(m b) c h w -> m b c h w', m=nh, b=b
                 )
+                g_aa = interpolate(g_aa, scale_factor=2, mode='bilinear', align_corners=False)
+                g_bb = interpolate(g_bb, scale_factor=2, mode='bilinear', align_corners=False)
                 log_bar = interpolate(log_bar, scale_factor=2, mode='bilinear', align_corners=False)
 
     if need_diffable:
         with torch.enable_grad():
-            f = torch.log(batch + stab_thresh) - convol_img(g, m_x, m_y)
-            log_ku = convol_img(f, m_x, m_y)
+            log_img = torch.log(batch + stab_thresh)
+
+            f_aa = log_img[0] - convol_img(g_aa[None], m_x, m_y)[0]
+            log_ku = convol_img(f_aa[None], m_x, m_y)[0]
+            log_bar_aa = db_aa + log_ku
+            g_aa = log_bar_aa - log_ku
+            f_aa = log_img[0] - convol_img(g_aa[None], m_x, m_y)[0]
+
+            f_bb = log_img[1] - convol_img(g_bb[None], m_x, m_y)[0]
+            log_ku = convol_img(f_bb[None], m_x, m_y)[0]
+            log_bar_bb = db_bb + log_ku
+            g_bb = log_bar_bb - log_ku
+
+            f_ab = log_img - convol_img(g_ba, m_x, m_y)
+            log_ku = convol_img(f_ab, m_x, m_y)
             log_bar = db + torch.sum(weights * log_ku, dim=0)
-            g = log_bar[None, ...] - log_ku
+            g_ba = log_bar[None, ...] - log_ku
 
     if return_cost:
-        dist = batch / batch.sum(dim=(2, 3, 4), keepdim=True)
-        return torch.exp(log_bar), torch.reshape((f[0] * dist[0] + g[0] * dist[1]), (b, -1)).mean(dim=1)
+        return torch.exp(log_bar), torch.reshape((f_ab[0] - f_aa) * batch[0] + (g_ba[0] - g_bb) * batch[1], (b, -1)).mean(-1)
     else:
         return torch.exp(log_bar)
 
 
 class FastConvolutionalW2Cost(_Loss):
-    def __init__(self, reduction='mean', scaling=0.95, use_pykeops=False):
+    def __init__(self, reduction='mean', scaling=0.95, use_pykeops=False, n_per_eps=1, n_extra_last_scale=4):
         super(FastConvolutionalW2Cost, self).__init__(reduction=reduction)
         self.scaling = scaling
         self.use_pykeops = use_pykeops
+        self.n_per_eps = n_per_eps
+        self.n_extra_last_scale = n_extra_last_scale
 
     def forward(self, source, target):
         stacked = torch.stack([source, target], dim=0)
 
         image, cost = batched_convol_bary_debiased(
-            stacked, scaling=self.scaling, return_cost=True, need_diffable=True, use_pykeops=self.use_pykeops
+            stacked, scaling=self.scaling, return_cost=True, need_diffable=True, use_pykeops=self.use_pykeops,
+            n_per_eps=self.n_per_eps, n_extra_last_scale=self.n_extra_last_scale
         )
         if self.reduction == 'mean':
             return image, cost.mean()
@@ -233,14 +269,16 @@ if __name__ == '__main__':
 
     # generate an image of a square
     # _image_of_square = torch.zeros(32, 32)
-    # # _image_of_square = torch.rand(32, 32)
+    # _image_of_square[0, 0] = 1
+    # _image_of_square = torch.rand(32, 32)
     # _image_of_square[8:24, 8:24] = 1
     # _image_of_square = _image_of_square.unsqueeze(0)
-    _image_of_square = create_circle(0, inner_rad=3, val=0.5)
-    _image_of_square = _image_of_square / torch.sum(_image_of_square, dim=(-1, -2), keepdim=True)
+    _image_of_square = create_circle(0, inner_rad=3.0, val=0.5)
+    # _image_of_square = _image_of_square / torch.sum(_image_of_square, dim=(-1, -2), keepdim=True)
 
     # # generate an image of a circle
     # _image_of_circle = torch.zeros(32, 32)
+    # _image_of_circle[-1, -1] = 1
     # _y, _x = torch.meshgrid(
     #     torch.arange(32, dtype=torch.float32),
     #     torch.arange(32, dtype=torch.float32),
@@ -250,11 +288,11 @@ if __name__ == '__main__':
     # _image_of_circle[_circle] = 1
     # _circle = (_x - 8) ** 2 + (_y - 8) ** 2 <= 3 ** 2
     # _image_of_circle[_circle] = 1
-    #
+
     # _image_of_circle = _image_of_circle.unsqueeze(0)
 
-    _image_of_circle = create_circle(2, inner_rad=3., val=0.5)
-    _image_of_circle = _image_of_circle / torch.sum(_image_of_circle, dim=(-1, -2), keepdim=True)
+    _image_of_circle = create_circle(2, inner_rad=3.0, val=0.5)
+    # _image_of_circle = _image_of_circle / torch.sum(_image_of_circle, dim=(-1, -2), keepdim=True)
 
     # # show the images
     # _, axes = plt.subplots(1, 2)
@@ -270,109 +308,39 @@ if __name__ == '__main__':
     # _target = torch.cat([_image_of_circle.unsqueeze(0), create_circle(0, inner_rad=1.5, val=0.5).unsqueeze(0)], dim=0).cuda()
 
     _source = _image_of_square.unsqueeze(0).cuda()
+    # _source = torch.rand(1, 1, 32, 32, dtype=torch.float32, device='cuda')
     _source.requires_grad_(True)
     _target = _image_of_circle.unsqueeze(0).cuda()
 
     _loss = FastConvolutionalW2Cost(scaling=0.9, reduction='none')
+    _image_ab, _cost = _loss(_source, _target)
 
-    _image, _cost = _loss(_source, _target)
+    # _, axs = plt.subplots(1, 3, figsize=(15, 5))
+    # axs[0].imshow(_image_ab.squeeze().detach().cpu().numpy())
+    # axs[0].set_title("Image AB")
+    # axs[1].imshow(_image_aa.squeeze().detach().cpu().numpy())
+    # axs[1].set_title("Image AA")
+    # axs[2].imshow(_image_bb.squeeze().detach().cpu().numpy())
+    # axs[2].set_title("Image BB")
+    # plt.tight_layout()
+    # plt.show()
+    #
+    # _cost = torch.reshape((f_ab[0] - f_aa[0]) * _source + (g_ba[0] - g_bb[0]) * _target, (1, -1)).mean(-1)
 
-    print(_cost)
-    [_g] = torch.autograd.grad(_cost.mean(), _source, retain_graph=False)
+    [_g] = torch.autograd.grad(_cost.mean(), [_source], retain_graph=False)
 
     print(_g.shape)
 
     # plot the gradient and the image
     _, axs = plt.subplots(1, 4, figsize=(15, 5))
-    axs[0].imshow(_g.squeeze().detach().cpu().numpy())
+    plt.colorbar(axs[0].imshow(_g.squeeze().detach().cpu().numpy()), ax=axs[0])
     axs[0].set_title("Gradient")
     axs[1].imshow(_source.squeeze().detach().cpu().numpy())
     axs[1].set_title("Source")
     axs[2].imshow(_target.squeeze().cpu().numpy())
     axs[2].set_title("Target")
-    axs[3].imshow(_image.squeeze().detach().cpu().numpy())
+    axs[3].imshow(_image_ab.squeeze().detach().cpu().numpy())
     axs[3].set_title("Computed Image")
-    plt.tight_layout()
-
-    # set the main title as the cost
-    plt.suptitle(f"Cost: {_cost.item():.6f}")
+    plt.suptitle(f"Cost: {_cost.mean().item():.4f}")
     plt.tight_layout()
     plt.show()
-
-    # Testing if the code works for circles that are very close
-    circle_1 = create_circle(0, inner_rad=3, val=0.5)
-    circle_2 = create_circle(2.0, inner_rad=3, val=0.5)
-    # circle_1 = create_circle(0.0, inner_rad=3, val=1)
-    _, axes = plt.subplots(1, 2)
-    circle_1 = circle_1 / circle_1.sum()
-    circle_2 = circle_2 / circle_2.sum()
-    axes[0].imshow(circle_1.cpu().numpy().transpose(1, 2, 0), cmap='gray')
-    axes[1].imshow(circle_2.cpu().numpy().transpose(1, 2, 0), cmap='gray')
-    plt.tight_layout()
-    plt.show()
-
-    # Test the calculation by comparison to python optmal transport (POT)
-    import ot
-    import geomloss
-    from brenier_wasserstein_motion_prior import BrenierW2Loss
-    unit_square_grid = True
-
-    # Get the pairwise euclidean distances
-    if unit_square_grid:
-        _y, _x = np.meshgrid(
-            np.arange(32, dtype=np.float32) / 31.0,
-            np.arange(32, dtype=np.float32) / 31.0,
-            indexing='ij'
-        )
-    else:
-        _y, _x = np.meshgrid(
-            np.arange(32, dtype=np.float32),
-            np.arange(32, dtype=np.float32),
-            indexing='ij'
-        )
-
-    # Concatenate the things
-    yx = np.concatenate([_y[..., None], _x[..., None]], axis=-1)
-
-    # Get the flattened images and grid
-    yx_flat = np.reshape(yx, (-1, 2))
-    img1_flat = np.reshape(circle_1.cpu().numpy().squeeze(), (-1,))
-    img2_flat = np.reshape(circle_2.cpu().numpy().squeeze(), (-1,))
-
-    # Normalize the images
-    img1_flat = img1_flat / img1_flat.sum()
-    img2_flat = img2_flat / img2_flat.sum()
-
-    # Calculate the cost matrix
-    C = ot.dist(yx_flat, yx_flat, metric='sqeuclidean')
-
-    # Also calculate some things necessary for geomloss
-    w_s, h_s = 32, 32
-    #sinkhorn_loss = geomloss.SamplesLoss(loss='sinkhorn', p=2, blur=1 / max(h_s, w_s), diameter=2 / max(w_s, h_s), scaling=0.9, debias=True)
-    # sinkhorn_loss = geomloss.SamplesLoss(loss='sinkhorn', p=2, blur=1 / max(h_s, w_s), diameter=2 / max(w_s, h_s),
-    #                                      scaling=0.9, debias=True)
-    sinkhorn_loss = geomloss.SamplesLoss(loss='sinkhorn', p=2, blur=0.0000001, scaling=0.9, backend="online")
-    geomloss_input_1 = torch.tensor(img1_flat)
-    geomloss_input_2 = torch.tensor(img2_flat)
-    grid = torch.tensor(yx_flat)
-    geomloss_val = sinkhorn_loss(geomloss_input_1[None, ...], grid[None, ...], geomloss_input_2[None, ...], grid[None, ...])
-
-    # Calculate the OT cost
-    loss = ot.emd2(img1_flat, img2_flat, C)
-    loss_sinkhorn = ot.sinkhorn2(img1_flat, img2_flat, C, 1 / max(h_s, w_s))
-
-    # Calculate the loss with the own debiased convolutional wasserstein distance
-    _loss = FastConvolutionalW2Cost(scaling=0.9, reduction='none')
-    loss_own = _loss(circle_1[None, ...], circle_2[None, ...])[-1]
-
-    # Get the BrenierW2Loss as well
-    brenier = BrenierW2Loss()
-    _loss = brenier(circle_1[None, ...], circle_2[None, ...])
-
-    # Printing some things
-    print("Python Optimal Transport: ", loss)
-    print("Python Optimal Transport sinkhorn:", loss_sinkhorn)
-    print("GeomLoss: ", geomloss_val)
-    print("Own debiased convolutional wasserstein distance:", loss_own)
-    print("Own Brenier-based loss:", _loss)
-    print("Finished running the tests...")
