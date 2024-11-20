@@ -146,11 +146,11 @@ def batched_convol_bary_debiased(
             t_x = torch.linspace(0, 1, w_s, dtype=batch.dtype, device=batch.device)
             t_y = torch.linspace(0, 1, h_s, dtype=batch.dtype, device=batch.device)
             if use_pykeops:
-                C_y = - (LazyTensor(t_x.view(1, w_s, 1, 1)) - LazyTensor(t_x.view(1, 1, w_s, 1))) ** 2 / 2
-                C_x = - (LazyTensor(t_y.view(1, h_s, 1, 1)) - LazyTensor(t_y.view(1, 1, h_s, 1))) ** 2 / 2
+                C_y = - (LazyTensor(t_x.view(1, w_s, 1, 1)) - LazyTensor(t_x.view(1, 1, w_s, 1))) ** 2
+                C_x = - (LazyTensor(t_y.view(1, h_s, 1, 1)) - LazyTensor(t_y.view(1, 1, h_s, 1))) ** 2
             else:
-                C_y = - (t_x.view(w_s, 1) - (t_x.view(1, w_s))) ** 2 / 2
-                C_x = - (t_y.view(h_s, 1) - (t_y.view(1, h_s))) ** 2 / 2
+                C_y = - (t_x.view(w_s, 1) - (t_x.view(1, w_s))) ** 2
+                C_x = - (t_y.view(h_s, 1) - (t_y.view(1, h_s))) ** 2
 
             eps_list = epsilon_schedule(2, 2 / max(w_s, h_s), 1 / max(h_s, w_s), scaling)
             # print(h_s, w_s, len(eps_list), eps_list[0], eps_list[-1])
@@ -215,7 +215,7 @@ def batched_convol_bary_debiased(
             g_ba = log_bar[None, ...] - log_ku
 
     if return_cost:
-        return torch.exp(log_bar), torch.reshape((f_ab[0] - f_aa) * batch[0] + (g_ba[0] - g_bb) * batch[1], (b, -1)).mean(-1)
+        return torch.exp(log_bar), torch.reshape((f_ab[0] - f_aa) * batch[0] + (g_ba[1] - g_bb) * batch[1], (b, -1)).mean(-1)
     else:
         return torch.exp(log_bar)
 
@@ -268,17 +268,18 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     # generate an image of a square
-    # _image_of_square = torch.zeros(32, 32)
-    # _image_of_square[0, 0] = 1
+    _image_of_square = torch.zeros(32, 32)
+    _image_of_square[0, 0] = 1
     # _image_of_square = torch.rand(32, 32)
     # _image_of_square[8:24, 8:24] = 1
-    # _image_of_square = _image_of_square.unsqueeze(0)
-    _image_of_square = create_circle(0, inner_rad=3.0, val=0.5)
+    _image_of_square = _image_of_square.unsqueeze(0)
+    # _image_of_square = create_circle(0, inner_rad=3.0, val=0.5)
     # _image_of_square = _image_of_square / torch.sum(_image_of_square, dim=(-1, -2), keepdim=True)
 
     # # generate an image of a circle
-    # _image_of_circle = torch.zeros(32, 32)
-    # _image_of_circle[-1, -1] = 1
+    _image_of_circle = torch.zeros(32, 32)
+    _image_of_circle[-1, -1] = 1
+    _image_of_circle = _image_of_circle.unsqueeze(0)
     # _y, _x = torch.meshgrid(
     #     torch.arange(32, dtype=torch.float32),
     #     torch.arange(32, dtype=torch.float32),
@@ -289,9 +290,8 @@ if __name__ == '__main__':
     # _circle = (_x - 8) ** 2 + (_y - 8) ** 2 <= 3 ** 2
     # _image_of_circle[_circle] = 1
 
-    # _image_of_circle = _image_of_circle.unsqueeze(0)
 
-    _image_of_circle = create_circle(2, inner_rad=3.0, val=0.5)
+    # _image_of_circle = create_circle(0, inner_rad=3.0, val=0.5)
     # _image_of_circle = _image_of_circle / torch.sum(_image_of_circle, dim=(-1, -2), keepdim=True)
 
     # # show the images
@@ -312,7 +312,7 @@ if __name__ == '__main__':
     _source.requires_grad_(True)
     _target = _image_of_circle.unsqueeze(0).cuda()
 
-    _loss = FastConvolutionalW2Cost(scaling=0.9, reduction='none')
+    _loss = FastConvolutionalW2Cost(scaling=0.95, reduction='none', n_extra_last_scale=4)
     _image_ab, _cost = _loss(_source, _target)
 
     # _, axs = plt.subplots(1, 3, figsize=(15, 5))
