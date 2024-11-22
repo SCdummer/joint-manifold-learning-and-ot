@@ -230,11 +230,11 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
         image0 = time_series[0, ...][None, ...]
 
         # Encode the initial image
-        z0 = encoder(image0)
+        _, z0, _ = encoder(image0)
 
         # Get a latent time series
         t = torch.linspace(0, (time_series.size(0) - 1) * nabla_t, (time_series.size(0) - 1) * num_int_steps + 1).to(device)
-        z_t = time_warper(z0.reshape(1, -1), t).reshape((time_series.size(0) - 1) * num_int_steps + 1, -1, z0.size(1), encoder.output_size[0], encoder.output_size[1])
+        z_t = time_warper(z0.reshape(1, -1), t) #.reshape((time_series.size(0) - 1) * num_int_steps + 1, -1, z0.size(1), encoder.output_size[0], encoder.output_size[1])
 
         # Get the points of reconstruction
         z_t = z_t[::num_int_steps].squeeze()
@@ -255,12 +255,12 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
 
         # Get the reconstructions as done via the training procedure. Note: here we need to use the subsampling!
         images_start = time_series[:-time_subsampling:time_subsampling]
-        z_start = encoder(images_start)
+        _, z_start, _ = encoder(images_start)
         end_time = nabla_t * time_subsampling
         t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling + 1).to(device)
-        z_end = time_warper(z_start.reshape(images_start.size(0), -1), t).reshape(time_subsampling * num_int_steps + 1, -1,
-                                                                 z_start.size(1), encoder.output_size[0],
-                                                                 encoder.output_size[1])[-1]
+        z_end = time_warper(z_start.reshape(images_start.size(0), -1), t)[-1]#.reshape(time_subsampling * num_int_steps + 1, -1,
+                                                                 #z_start.size(1), encoder.output_size[0],
+                                                                 #encoder.output_size[1])[-1]
         images_end = time_series[time_subsampling::time_subsampling, ...]
         images_end_recon = decoder(z_end)
         images_start_recon = decoder(z_start)
@@ -299,7 +299,7 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
             plt.close('all')
 
         # Also save the static reconstructions
-        z = encoder(time_series)
+        _, z, _ = encoder(time_series)
         recon_static = decoder(z)
 
         # Get the loss value
@@ -340,7 +340,7 @@ def evaluate_random_static_train_reconstructions(experiment_directory, encoder, 
         inputs = inputs[idx]
 
     # Encode and decode them
-    z = encoder(inputs)
+    z, _, _ = encoder(inputs)
     recon = decoder(z)
 
     # Get the loss value
@@ -508,7 +508,7 @@ def train_model(experiment_directory):
             batch = batch.to(device)
 
             # Encode
-            z = encoder(batch)
+            z, _, _ = encoder(batch)
 
             # Decode
             recon = decoder(z)

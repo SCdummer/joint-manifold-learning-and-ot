@@ -112,5 +112,5 @@ class CellData(torch.utils.data.Dataset):
                 return (track_id, img_idx_1, img_idx_2, data)
             else:
                 track_id, img_idx = self.idx_to_track_id_image[idx]
-                return (track_id, img_idx, ( (self.data_dict[track_id][img_idx] - self.min_val) * self.scaling_factor))
+                return (track_id, img_idx, (self.data_dict[track_id][img_idx] - self.min_val) * self.scaling_factor)
 
