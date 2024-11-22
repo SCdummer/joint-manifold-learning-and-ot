@@ -27,7 +27,7 @@ class CellData(torch.utils.data.Dataset):
         for folder in os.listdir(data_dir):
 
             # Get the track id
-            track_id = re.search(r'\d+$', folder.split('_')[0])
+            track_id = int(re.search(r'\d+$', folder).group())
 
             # Initialize the entry corresponding to this id
             self.data_dict[track_id] = []
@@ -42,7 +42,7 @@ class CellData(torch.utils.data.Dataset):
                 time = int(filename[-7:-4])
 
                 # Skip this one if it does not satisfy the time step
-                if time + 1 == 1 or ((time+1) % time_step == 0):
+                if time % time_step == 0:
 
                     # Load the image and add to the dictionary
                     img = np.array(Image.open(os.path.join(data_dir, folder, filename)))
@@ -108,9 +108,9 @@ class CellData(torch.utils.data.Dataset):
         else:
             if self.dynamic:
                 track_id, img_idx_1, img_idx_2 = self.idx_to_track_id_time_pair[idx]
-                return (((self.data_dict[track_id][img_idx_1] - self.min_val) * self.scaling_factor),
-                        ((self.data_dict[track_id][img_idx_2] - self.min_val) * self.scaling_factor))
+                data = tuple([(self.data_dict[track_id][i] - self.min_val) * self.scaling_factor for i in range(img_idx_1, img_idx_2+1)])
+                return (track_id, img_idx_1, img_idx_2, data)
             else:
                 track_id, img_idx = self.idx_to_track_id_image[idx]
-                return ( (self.data_dict[track_id][img_idx] - self.min_val) * self.scaling_factor)
+                return (track_id, img_idx, ( (self.data_dict[track_id][img_idx] - self.min_val) * self.scaling_factor))
 
