@@ -157,7 +157,7 @@ class SquareTimeSeries:
         square = create_square(center_x, center_y, side_length, theta, self.resolution)
 
         # Get the largest points
-        min_x, max_x, min_y, max_y = self.calculate_largest_point(square, self.resolution)
+        min_x, max_x, min_y, max_y = self.calculate_largest_point(square)
 
         # Get the derivative with respect to the center
         weighting_x = torch.maximum(torch.sigmoid(-(self.resolution_x - max_x - self.shift)) ** 2, torch.sigmoid(-(min_x - self.shift)) ** 2)
@@ -429,7 +429,8 @@ if __name__ == '__main__':
     resolution = (resolution_x, resolution_y)
 
     # Get the object that can be used to create time series
-    time_series_creator_destination = SquareTimeSeriesDesiredDestination(shift=int(min(resolution_x, resolution_y) / 8),
+    time_series_creator_destination = SquareTimeSeriesDesiredDestination(use_forcing=False,
+                                                                         shift=int(min(resolution_x, resolution_y) / 8),
                                                                          force_field_magnitude=force_field_magnitude,
                                                                          resolution=resolution,
                                                                          desired_center_x=desired_center_x,
