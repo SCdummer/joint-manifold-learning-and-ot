@@ -406,8 +406,8 @@ if __name__ == '__main__':
     num_time_points = 50
 
     # Define the resolution in each direction
-    resolution_x = 128
-    resolution_y = 128
+    resolution_x = 64
+    resolution_y = 64
 
     # Define the time between two time steps
     nabla_t = 0.1
@@ -416,14 +416,14 @@ if __name__ == '__main__':
     desired_center_x = resolution_x / 2
     desired_center_y = resolution_y / 8 * 6
     desired_side_length = min(resolution_x, resolution_y) / 4
-    force_field_magnitude = 20.0
-    speed_constant_x = 0.0
-    speed_constant_y = 7.5
-    speed_constant_side_length = 1.5
+    force_field_magnitude = 20.0 * min(resolution_x, resolution_y) / 128
+    speed_constant_x = 0.0 * resolution_x / 128
+    speed_constant_y = 7.5 * resolution_y / 128
+    speed_constant_side_length = 1.5 * min(resolution_x, resolution_y) / 128
     approx_const_grad_vel = True
     sigma_x = max(resolution_x, resolution_y) * 1000
     sigma_y = min(resolution_y, resolution_x) / 8
-    amplifier = 20.0
+    amplifier = 20.0 * min(resolution_x, resolution_y) / 128
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)
