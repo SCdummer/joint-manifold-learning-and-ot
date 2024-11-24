@@ -6,7 +6,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 import matplotlib.pyplot as plt
 from PIL import Image
 
-def create_square(center_x, center_y, side_length, theta, resolution=(28, 28)):
+def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), use_smooth_function=True):
     r"""Creates an image of a square on a 2D plane.
 
     Args:
@@ -21,6 +21,9 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28)):
         resolution (tuple of ints): the resolution of the resulting image. The values of center_x, center_y, and
                                     side_length should all be within [0, resolution[0]], [0, resolution[1]], and
                                     [0, min(resolution[0], resolution[1])] respectively.
+
+        use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
+                                    boundary or whether to have an indicator function representing the square.
 
     Returns:
         a torch tensor of size (N, resolution[0], resolution[1]) representing images of squares.
@@ -48,8 +51,20 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28)):
                              (xy_rotated[:, 1, ...] + side_length[:, None, None] / 2)>=0)
     mask = torch.logical_and(mask_x_coord, mask_y_coord)
 
+    # Create a nice profile for the image
+    if use_smooth_function:
+        shifted_x = xy_rotated[:, 0, ...]
+        shifted_y = xy_rotated[:, 1, ...]
+        xy_squared_max_norm = torch.maximum(torch.abs(shifted_x), torch.abs(shifted_y))
+        scaling = side_length[:, None, None] / 2
+        molifier_profile = torch.where (xy_squared_max_norm - side_length[:, None, None] / 2 < 0,
+                                        torch.exp(-1.0 / (1 - xy_squared_max_norm / scaling) + 1),
+                                                  0.0 * torch.ones_like(xy_squared_max_norm))
+    else:
+        molifier_profile = torch.ones_like(mask)
+
     # Get the square
-    square_arr[mask] = 1.0
+    square_arr = mask.float() * molifier_profile
 
     # Return the square
     return square_arr
@@ -69,8 +84,11 @@ class SquareTimeSeries:
 
         resolution (tuple of ints): resolution of the images.
 
+        use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
+                            boundary or whether to have an indicator function representing the square.
+
     """
-    def __init__(self, use_forcing=True, shift=2, force_field_magnitude=2.0, resolution=(28, 28)):
+    def __init__(self, use_forcing=True, shift=2, force_field_magnitude=2.0, resolution=(28, 28), use_smooth_function=True):
         self.use_forcing = use_forcing
         self.shift = shift
         if use_forcing:
@@ -79,6 +97,7 @@ class SquareTimeSeries:
             self.force_field_magnitude = 0.0
         self.resolution = resolution
         self.resolution_x, self.resolution_y = resolution
+        self.use_smooth_function = use_smooth_function
 
     def calculate_largest_point(self, square):
         r"""Given a square image, it calculates the maximum x value, maximum y value, minimum x value, and minimum y
@@ -101,7 +120,7 @@ class SquareTimeSeries:
         resolution_x, resolution_y = self.resolution
 
         # Get the mask
-        mask = (square == 1.0)
+        mask = (square > 0.0)
 
         # Get the x-index matrix and the y-index matrix
         x_index = torch.arange(0, resolution_x)[None, :].repeat((resolution_y, 1))
@@ -154,7 +173,7 @@ class SquareTimeSeries:
         center_x, center_y, side_length, theta = z[:, 0], z[:, 1], z[:, 2], z[:, 3]
 
         # Get the current square
-        square = create_square(center_x, center_y, side_length, theta, self.resolution)
+        square = create_square(center_x, center_y, side_length, theta, self.resolution, self.use_smooth_function)
 
         # Get the largest points
         min_x, max_x, min_y, max_y = self.calculate_largest_point(square)
@@ -213,7 +232,7 @@ class SquareTimeSeries:
         centert_y = centert_y.reshape(-1)
         side_lengtht = side_lengtht.reshape(-1)
         thetat = thetat.reshape(-1)
-        squares = create_square(centert_x, centert_y, side_lengtht, thetat, self.resolution).reshape(z_t.size(0), z_t.size(1), self.resolution_x, self.resolution_y)
+        squares = create_square(centert_x, centert_y, side_lengtht, thetat, self.resolution, self.use_smooth_function).reshape(z_t.size(0), z_t.size(1), self.resolution_x, self.resolution_y)
 
         # Return the squares and the latent vectors generating the squares
         return z_t, squares
@@ -402,7 +421,7 @@ if __name__ == '__main__':
     ###########################################################################
 
     # Define the number of time series and the number of time points
-    num_time_series = 100
+    num_time_series = 10
     num_time_points = 50
 
     # Define the resolution in each direction
