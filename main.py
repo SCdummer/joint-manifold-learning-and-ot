@@ -211,7 +211,7 @@ if __name__ == '__main__':
     lightning_seed = int.from_bytes(os.urandom(4), 'little')
     dataloader_seed = int.from_bytes(os.urandom(4), 'little')
 
-    for (_dataset, epochs) in [('HeLa', 5)]:
+    for (_dataset, epochs) in [('HeLa', 100)]:
         num_channels = 1 if _dataset in ['HeLa'] else 3
         b_s = 64
         wd_recon = 1e-4
