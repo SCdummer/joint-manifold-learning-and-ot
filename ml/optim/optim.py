@@ -3,7 +3,7 @@ import torch
 import ml.optim.custom as custom_optim
 
 
-def init_optims_from_config(config, model):
+def init_optims_from_config(config, *models):
     if config.opt.turn_off_norm_weight_decay:
         custom_keys_weight_decay = [
             (key, 0.) for key in ["class_token", "position_embedding", "relative_position_bias_table"]
@@ -12,14 +12,18 @@ def init_optims_from_config(config, model):
             custom_keys_weight_decay.extend([
                 (key, 0.) for key in config.custom_keys_weight_decay_filter
             ])
-        params = set_weight_decay(
-            model, config.opt.params.weight_decay, 0., custom_keys_weight_decay=custom_keys_weight_decay
-        )
+        params = [
+            param
+            for model in models
+            for param in set_weight_decay(
+                model, config.opt.params.weight_decay, 0., custom_keys_weight_decay=custom_keys_weight_decay
+            )
+        ]
         print('Turn Off Norm Weight Decay')
         for param_groups in params:
             print(len(param_groups['params']), param_groups['weight_decay'])
     else:
-        params = [p for p in model.parameters() if p.requires_grad]
+        params = [p for model in models for p in model.parameters() if p.requires_grad]
 
     if hasattr(torch.optim, config.opt.name):
         base_optim = opt = getattr(torch.optim, config.opt.name)(
