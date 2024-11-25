@@ -254,3 +254,8 @@ class JointReconODETrainer(ODETrainer):
             plt.close()
 
         return loss
+
+    def configure_optimizers(self):
+        # initialise optimizers and lr schedulers
+        optim = init_optims_from_config(self.config, self.model, self.encoder, self.decoder)
+        return optim
