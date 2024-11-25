@@ -7,6 +7,7 @@ import lightning as pl
 
 from torch.utils.data import DataLoader
 
+from ml.trainer.base import JointReconODETrainer
 from ml.util import REGISTRY
 from ml.optim import get_loss
 from ml.trainer import BaseTrainer, ODETrainer, MyWandBLogger
@@ -176,7 +177,7 @@ def train_ode(cfg, ae, fast_dev_run=False):
     loss_fn = get_loss(cfg.loss_fn.name, cfg.loss_fn.params)
     metrics = {m.short_name: getattr(torchmetrics, m.name)(**m.params) for m in cfg.metrics}
 
-    ode_training_module_cls = ODETrainer
+    ode_training_module_cls = JointReconODETrainer
     neural_ode = REGISTRY['model'].get(cfg.model.name)(**cfg.model.params)
     training_module = ode_training_module_cls(
         cfg, neural_ode, loss_fn, metrics, dataset_class.NORMALIZE, dataset_class.DE_NORMALIZE,
@@ -210,7 +211,7 @@ if __name__ == '__main__':
     lightning_seed = int.from_bytes(os.urandom(4), 'little')
     dataloader_seed = int.from_bytes(os.urandom(4), 'little')
 
-    for (_dataset, epochs) in [('HeLa', 25)]:
+    for (_dataset, epochs) in [('HeLa', 5)]:
         num_channels = 1 if _dataset in ['HeLa'] else 3
         b_s = 64
         wd_recon = 1e-4
