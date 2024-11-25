@@ -7,10 +7,9 @@ import lightning as pl
 
 from torch.utils.data import DataLoader
 
-from ml.trainer.base import JointReconODETrainer
 from ml.util import REGISTRY
 from ml.optim import get_loss
-from ml.trainer import BaseTrainer, ODETrainer, MyWandBLogger
+from ml.trainer import BaseTrainer, ODETrainer, JointReconODETrainer, MyWandBLogger
 
 
 def train_recon(cfg, fast_dev_run=False):
