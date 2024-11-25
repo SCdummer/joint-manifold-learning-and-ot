@@ -168,6 +168,82 @@ class ODETrainer(BaseTrainer):
             path_to_save_to = Path(self.dir_name, f'ode_val', f'{batch_idx}', f'epoch={self.current_epoch}.png')
             os.makedirs(path_to_save_to.parent, exist_ok=True)
             plt.savefig(path_to_save_to)
-
             plt.close()
+
+        return loss
+
+
+class JointReconODETrainer(ODETrainer):
+    def __init__(
+            self,
+            config, model, loss_fn, metrics, normalisation, de_normalisation,
+            encoder, decoder
+    ):
+        super().__init__(config, model, loss_fn, metrics, normalisation, de_normalisation, encoder, decoder)
+
+    def training_step(self, batch, batch_idx):
+        x0, x1 = batch
+        _stacked = torch.cat((x0, x1), dim=0)
+        _normalised_stacked = self.normalisation(_stacked)
+        _stacked_latents = self.encoder(_normalised_stacked)
+        z0, z1 = torch.chunk(_stacked_latents, 2, dim=0)
+        zt = self.model(z0)
+
+        # for now, we will only consider the last time step
+        zt = zt[-1]
+
+        l_loss = self.loss_fn(zt, z1)
+
+        _stacked_latents = torch.cat((z0, z1, zt), dim=0)
+        _stacked_recon = self.decoder(_stacked_latents)
+
+        y0, y1, yt = torch.chunk(_stacked_recon, 3, dim=0)
+        recon_loss = (self.loss_fn(y0, x0) + self.loss_fn(y1, x1)) / 2
+        data_match_loss = self.loss_fn(yt, x1)
+
+        loss = (recon_loss + l_loss + data_match_loss) / 3
+
+        self.log('train/loss', loss, prog_bar=True, on_epoch=False, on_step=True)
+        self.log('train/l_loss', l_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log('train/r_loss', recon_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.train_metrics.update(yt, x1)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x0, x1 = batch
+        _stacked = torch.cat((x0, x1), dim=0)
+        _normalised_stacked = self.normalisation(_stacked)
+        _stacked_latents = self.encoder(_normalised_stacked)
+        z0, z1 = torch.chunk(_stacked_latents, 2, dim=0)
+        zt = self.model(z0)
+
+        zt = zt[-1]
+
+        latent_loss = self.loss_fn(zt, z1)
+        _stacked_latents = torch.cat((z0, z1, zt), dim=0)
+        _stacked_recon = self.decoder(_stacked_latents)
+
+        y0, y1, yt = torch.chunk(_stacked_recon, 3, dim=0)
+        reconstruction_loss = (self.loss_fn(y0, x0) + self.loss_fn(y1, x1)) / 2
+        data_match_loss = self.loss_fn(yt, x1)
+
+        loss = (reconstruction_loss + latent_loss + data_match_loss) / 3
+        self.log('val/loss', loss, prog_bar=False, on_epoch=True, on_step=False)
+        self.log('val/l_loss', latent_loss, prog_bar=False, on_epoch=True, on_step=False)
+        self.log('val/r_loss', reconstruction_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.val_metrics.update(yt, x1)
+        if batch_idx % 5 == 0:
+            # save the images from the first batch
+            y_hat = self.de_normalisation(yt)
+            np_x0, np_y_hat, np_x1 = x1.detach().cpu().numpy(), y_hat.detach().cpu().numpy(), x1.detach().cpu().numpy()
+            _, axs = plt.subplots(1, 3, figsize=(15, 5))
+            axs[0].imshow(np_x0[0].squeeze(), cmap='gray')
+            axs[1].imshow(np_y_hat[0].squeeze(), cmap='gray')
+            axs[2].imshow(np_x1[0].squeeze(), cmap='gray')
+
+            path_to_save_to = Path(self.dir_name, f'joint_recon_ode_val', f'{batch_idx}', f'epoch={self.current_epoch}.png')
+            os.makedirs(path_to_save_to.parent, exist_ok=True)
+            plt.savefig(path_to_save_to)
+            plt.close()
+
         return loss
