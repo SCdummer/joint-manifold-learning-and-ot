@@ -180,6 +180,11 @@ class JointReconODETrainer(ODETrainer):
             encoder, decoder
     ):
         super().__init__(config, model, loss_fn, metrics, normalisation, de_normalisation, encoder, decoder)
+        self.encoder = encoder.train()
+        self.decoder = decoder.train()
+
+        self.encoder.requires_grad_(True)
+        self.decoder.requires_grad_(True)
 
     def training_step(self, batch, batch_idx):
         x0, x1 = batch
