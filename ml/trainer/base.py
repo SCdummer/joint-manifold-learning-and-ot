@@ -211,6 +211,7 @@ class JointReconODETrainer(ODETrainer):
         self.log('train/loss', loss, prog_bar=True, on_epoch=False, on_step=True)
         self.log('train/l_loss', l_loss, prog_bar=True, on_epoch=True, on_step=False)
         self.log('train/r_loss', recon_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log('train/dm_loss', data_match_loss, prog_bar=True, on_epoch=True, on_step=False)
         self.train_metrics.update(yt, x1)
         return loss
 
@@ -236,6 +237,7 @@ class JointReconODETrainer(ODETrainer):
         self.log('val/loss', loss, prog_bar=False, on_epoch=True, on_step=False)
         self.log('val/l_loss', latent_loss, prog_bar=False, on_epoch=True, on_step=False)
         self.log('val/r_loss', reconstruction_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log('val/dm_loss', data_match_loss, prog_bar=True, on_epoch=True, on_step=False)
         self.val_metrics.update(yt, x1)
         if batch_idx % 5 == 0:
             # save the images from the first batch
