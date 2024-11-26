@@ -70,6 +70,18 @@ class HeLaCells(VisionDataset):
     def get_sampling_weights(self):
         return self.sample_weights
 
+    def get_full_track(self, track_idx):
+        if isinstance(track_idx, str):
+            track_images = self.all_images_per_track[track_idx][0]
+        elif isinstance(track_idx, int):
+            track_images = self.all_images_per_track[list(self.all_images_per_track.keys())[track_idx]][0]
+        else:
+            raise ValueError('track_idx must be either a string or an integer')
+        return list(map(lambda x: pil_loader(x).convert('L'), track_images))
+
+    def get_tracks_selected(self):
+        return list(self.all_images_per_track.keys())
+
     def __len__(self):
         return len(self.image_tracks)
 
