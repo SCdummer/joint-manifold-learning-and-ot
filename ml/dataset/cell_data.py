@@ -122,14 +122,14 @@ class HeLaCellsSuccessive(HeLaCells):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    _n_successive = 4
+    _n_successive = 3
     _ds = HeLaCellsSuccessive(
         Path('..', '..', 'data'), seed=42,
         split='train', test_size=0.2, n_successive=_n_successive,
     )
     _dl = iter(
         torch.utils.data.DataLoader(
-            _ds, batch_size=64 // _n_successive,
+            _ds, batch_size=64 // (_n_successive + 1),
             sampler=torch.utils.data.WeightedRandomSampler(
                 _ds.get_sampling_weights(), 100, replacement=False
             )
