@@ -139,6 +139,10 @@ if __name__ == '__main__':
         Path('..', '..', 'data'), seed=42,
         split='train', test_size=0.2, n_successive=_n_successive,
     )
+
+    print(_ds.get_tracks_selected())
+    print(_ds.get_full_track(0))
+
     _dl = iter(
         torch.utils.data.DataLoader(
             _ds, batch_size=64 // (_n_successive + 1),
