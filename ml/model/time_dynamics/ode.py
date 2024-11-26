@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from einops import rearrange
-from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint
 
 from ml.model import utils
 
@@ -11,12 +11,13 @@ class ODEFunc(nn.Module):
     def __init__(self, dim):
         super(ODEFunc, self).__init__()
         self.dim = dim
+
         self.net = nn.Sequential(
-            nn.Linear(dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, dim),
+            nn.Linear(dim, 128),
+            nn.SiLU(),
+            nn.Linear(128, 128),
+            nn.SiLU(),
+            nn.Linear(128, dim),
         )
 
     def forward(self, t, x):
@@ -31,7 +32,7 @@ class ODEBlock(nn.Module):
 
     def forward(self, x):
         t = torch.linspace(0, 1, self.timesteps).to(x.device)
-        x = odeint(self.odefunc, x, t)
+        x = odeint(self.odefunc, x, t, method='dopri5')
         return x
 
 
