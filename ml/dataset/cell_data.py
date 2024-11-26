@@ -11,7 +11,7 @@ from torchvision.datasets.folder import pil_loader
 from ml.util import register
 
 
-@register('dataset', 'HeLa')
+@register('dataset', 'HeLaPair')
 class HeLaCells(VisionDataset):
     IMG_SIZE = (64, 64)
 
@@ -99,7 +99,7 @@ class HeLaCells(VisionDataset):
         return x0, x1
 
 
-@register('dataset', 'HeLaSuccessive')
+@register('dataset', 'HeLa')
 class HeLaCellsSuccessive(HeLaCells):
 
     def __init__(
@@ -108,32 +108,50 @@ class HeLaCellsSuccessive(HeLaCells):
         super(HeLaCellsSuccessive, self).__init__(root, split, seed, test_size, transform)
         self.n_successive = n_successive
 
-        self.image_tracks = []
-        self.sample_weights = []
-        for track, (images, start_time, end_time) in self.all_images_per_track.items():
+        self.image_tracks = {}
+        for track_id, (track, (images, start_time, end_time)) in enumerate(self.all_images_per_track.items()):
+            self.image_tracks[track_id] = []
             for i in range(len(images) - n_successive):
-                self.image_tracks.append(
+                self.image_tracks[track_id].append(
                     (
                         images[i:i + n_successive + 1],
                         ((start_time + i) / end_time, (start_time + i + n_successive) / end_time)
                     )
                 )
-                self.sample_weights.append(self.track_weights[track])
+
+    def get_sampling_weights(self):
+        return list(self.track_weights.values())
+
+    @staticmethod
+    def get_collate_fn():
+        # stack the images along the batch dimension using concatenation
+        def collate_fn(batch):
+            # batch is a list of tuples (x, t) where x is a list of images [(c, h, w) * n] and t is the time (n,)
+            # first chunk should be the images[0] of each track, second chunk should be images[1] of each track etc.
+            x, t = zip(*batch)  # x is a list of [(c, h, w) * n] and t is a list of (n,)
+            x, t = list(zip(*x)), list(zip(*t))
+            x, t = [torch.stack(x_i, dim=0) for x_i in x], [torch.stack(t_i, dim=0) for t_i in t]
+            x, t = torch.concat(x, dim=0), torch.concat(t, dim=0)
+            return x, t
+        return collate_fn
+
+    def __len__(self):
+        return len(self.image_tracks)
 
     def __getitem__(self, idx):
-        xs, times = self.image_tracks[idx]
+        successive_tracks = self.image_tracks[idx]
+        # same a random successive track index
+        rand_successive_frames = torch.randint(0, len(successive_tracks), (1,)).item()
+        xs, times = successive_tracks[rand_successive_frames]
         xs = [pil_loader(x).convert('L') for x in xs]
         xs = [self.transform(x) for x in xs]
 
         # stack the images along a new dimension
-        x = torch.stack(xs, dim=0)
         t = torch.linspace(times[0], times[1], steps=self.n_successive + 1, dtype=torch.float32)
-        return x, t  # (n_successive, 1, 64, 64), (n_successive,)
+        return xs, t  # [(1, 64, 64) * n_successive], (n_successive,)
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-
     _n_successive = 3
     _ds = HeLaCellsSuccessive(
         Path('..', '..', 'data'), seed=42,
@@ -145,26 +163,16 @@ if __name__ == '__main__':
 
     _dl = iter(
         torch.utils.data.DataLoader(
-            _ds, batch_size=64 // (_n_successive + 1),
+            _ds, batch_size=16 // (_n_successive + 1),
             sampler=torch.utils.data.WeightedRandomSampler(
-                _ds.get_sampling_weights(), 100, replacement=False
-            )
+                _ds.get_sampling_weights(), 200, replacement=True
+            ),
+            collate_fn=_ds.get_collate_fn()
         )
     )
 
     print(repr(_ds))
 
-    for _i in range(5):
+    for _i in range(1):
         _x, _t = next(_dl)
         print(_x.shape, _t.shape)
-
-        _x, _t = _x[0], _t[0]
-
-        fig, axs = plt.subplots(1, _n_successive + 1, figsize=(4 * (_n_successive + 1), 4))
-        if _n_successive == 0:
-            axs = [axs]
-
-        for _j in range(_n_successive + 1):
-            axs[_j].imshow(_x[_j].squeeze(), cmap='gray')
-            axs[_j].set_title(f'Time: {_t[_j]:.2f}')
-        plt.show()
