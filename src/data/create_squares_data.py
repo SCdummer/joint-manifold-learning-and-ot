@@ -57,9 +57,9 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), u
         shifted_y = xy_rotated[:, 1, ...]
         xy_squared_max_norm = torch.maximum(torch.abs(shifted_x), torch.abs(shifted_y))
         scaling = side_length[:, None, None] / 2
-        molifier_profile = torch.where (xy_squared_max_norm - side_length[:, None, None] / 2 < 0,
-                                        torch.exp(-1.0 / (1 - xy_squared_max_norm / scaling) + 1),
-                                                  0.0 * torch.ones_like(xy_squared_max_norm))
+        molifier_profile = torch.where(xy_squared_max_norm - side_length[:, None, None] / 2 < 0,
+                                       torch.exp(-1.0 / (1 - xy_squared_max_norm / (scaling)) + 1),
+                                                 0.0 * torch.ones_like(xy_squared_max_norm))
     else:
         molifier_profile = torch.ones_like(mask)
 
@@ -252,9 +252,13 @@ class SquareTimeSeriesRandom(SquareTimeSeries):
         force_field_magnitude (int or float): the strength of the force term.
 
         resolution (tuple of ints): resolution of the images.
+
+        use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
+                            boundary or whether to have an indicator function representing the square.
     """
-    def __init__(self, shift=2, force_field_magnitude=2.0, resolution=(28, 28)):
-        super().__init__(use_forcing=True, shift=shift, force_field_magnitude=force_field_magnitude, resolution=resolution)
+    def __init__(self, shift=2, force_field_magnitude=2.0, resolution=(28, 28), use_smooth_function=True):
+        super().__init__(use_forcing=True, shift=shift, force_field_magnitude=force_field_magnitude,
+                         resolution=resolution, use_smooth_function=use_smooth_function)
         self.dyn_mat = torch.randn(4,4)
 
     def calc_dzdt_in_safe_region(self, center_x, center_y, side_length, theta):
@@ -305,12 +309,16 @@ class SquareTimeSeriesDesiredDestination(SquareTimeSeries):
         sigma_y (float): the same but then for the y-coordinate.
 
         amplifier (float): how much the speed constants are multiplied by in the region of the aforementioned gaussian.
+
+        use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
+                                    boundary or whether to have an indicator function representing the square.
     """
     def __init__(self, use_forcing, shift=2, force_field_magnitude=2.0, resolution=(28, 28),
                  desired_center_x=None, desired_center_y=None, desired_side_length=None,
                  speed_constant_x=0.02, speed_constant_y=0.02, speed_constant_side_length=0.02,
-                 approx_const_grad_vel=True, sigma_x=None, sigma_y=None, amplifier=5.0):
-        super().__init__(use_forcing=use_forcing, shift=shift, force_field_magnitude=force_field_magnitude, resolution=resolution)
+                 approx_const_grad_vel=True, sigma_x=None, sigma_y=None, amplifier=5.0, use_smooth_function=True):
+        super().__init__(use_forcing=use_forcing, shift=shift, force_field_magnitude=force_field_magnitude,
+                         resolution=resolution, use_smooth_function=use_smooth_function)
         self.desired_center_x = desired_center_x
         self.desired_center_y = desired_center_y
         self.desired_side_length = desired_side_length
@@ -434,7 +442,7 @@ if __name__ == '__main__':
     # Put in the values necessary for generating the dataset
     desired_center_x = resolution_x / 2
     desired_center_y = resolution_y / 8 * 6
-    desired_side_length = min(resolution_x, resolution_y) / 4
+    desired_side_length = min(resolution_x, resolution_y) * 5 / 10
     force_field_magnitude = 20.0 * min(resolution_x, resolution_y) / 128
     speed_constant_x = 0.0 * resolution_x / 128
     speed_constant_y = 7.5 * resolution_y / 128
@@ -443,6 +451,8 @@ if __name__ == '__main__':
     sigma_x = max(resolution_x, resolution_y) * 1000
     sigma_y = min(resolution_y, resolution_x) / 8
     amplifier = 20.0 * min(resolution_x, resolution_y) / 128
+    use_smooth_function = False
+    name_squares_dataset = "horizontally_moving_big_dataset_indicator_small"
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)
@@ -460,12 +470,13 @@ if __name__ == '__main__':
                                                                          speed_constant_side_length=speed_constant_side_length,
                                                                          approx_const_grad_vel=approx_const_grad_vel,
                                                                          sigma_x=sigma_x, sigma_y=sigma_y,
-                                                                         amplifier=amplifier)
+                                                                         amplifier=amplifier,
+                                                                         use_smooth_function=use_smooth_function)
 
     # Get some random initial conditions
     center0_x = resolution_x / 2 + resolution_x / 4 * (2.0 * np.random.rand(num_time_series) - 1)
     center0_y = resolution_y / 6 + 0.0 * center0_x
-    side_length0 = min(resolution_x, resolution_y) / 18 + min(resolution_x, resolution_y) / 18 * np.random.rand(
+    side_length0 = min(resolution_x, resolution_y) / 9 + min(resolution_x, resolution_y) / 9 * np.random.rand(
         num_time_series)
     theta0 = 0.0 * (2 * np.random.rand(num_time_series) - 1)
 
@@ -473,7 +484,7 @@ if __name__ == '__main__':
     z_t, squares = time_series_creator_destination.calculate_image_path(center0_x, center0_y, side_length0, theta0, num_time_points, nabla_t)
 
     # Save the squares and gifs
-    save_squares_latents_and_gifs("horizontally_moving", squares.numpy(), z_t.numpy())
+    save_squares_latents_and_gifs(name_squares_dataset, squares.numpy(), z_t.numpy())
 
 
     #

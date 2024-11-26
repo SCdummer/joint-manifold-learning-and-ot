@@ -23,6 +23,9 @@ class CellData(torch.utils.data.Dataset):
         self.max_val = -100000000000000
         self.min_val = 100000000000000
 
+        # Create a dictionary that saves all the image filenames per track and not only a subsampling.
+        self.all_images_per_track = {}
+
         # Load all the data in a dictionary
         for folder in os.listdir(data_dir):
 
@@ -35,19 +38,31 @@ class CellData(torch.utils.data.Dataset):
             # Grab all the images
             img_filenames = sorted(os.listdir(os.path.join(data_dir, folder)))
 
+            # Get the beginning and end time
+            begin_time = int(img_filenames[0][-7:-4])
+            end_time = int(img_filenames[-1][-7:-4])
+
             # Load the images and add them to the dictionary
             for filename in img_filenames:
 
                 # Get the time
                 time = int(filename[-7:-4])
 
+                # Load the image
+                img = np.array(Image.open(os.path.join(data_dir, folder, filename)))
+                if len(img.shape) == 2:
+                    img = img[np.newaxis, :, :]
+
+                # In case we want to save all the images
+                if track_id not in self.all_images_per_track:
+                    self.all_images_per_track[track_id] = ([os.path.join(data_dir, folder, filename)], begin_time, end_time)
+                else:
+                    self.all_images_per_track[track_id][0].append(os.path.join(data_dir, folder, filename))
+
                 # Skip this one if it does not satisfy the time step
                 if time % time_step == 0:
 
-                    # Load the image and add to the dictionary
-                    img = np.array(Image.open(os.path.join(data_dir, folder, filename)))
-                    if len(img.shape) == 2:
-                        img = img[np.newaxis, :, :]
+                    # In this case save the data in the dictionary of images that we want to use.
                     self.data_dict[track_id].append(img)
 
                     # Update the maximum and minimum values
@@ -101,6 +116,17 @@ class CellData(torch.utils.data.Dataset):
                 return self.num_img_pairs
             else:
                 return self.num_imgs
+
+    def get_full_track(self, track_idx):
+        if isinstance(track_idx, str):
+            track_images = self.all_images_per_track[track_idx][0]
+        elif isinstance(track_idx, int):
+            track_images = self.all_images_per_track[list(self.all_images_per_track.keys())[track_idx]][0]
+        else:
+            raise ValueError('track_idx must be either a string or an integer')
+        np_array_track = list(map(lambda x: np.array(Image.open(x)), track_images))
+        return [img[np.newaxis, :, :] if len(img.shape) == 2 else img for img in np_array_track]
+
 
     def __getitem__(self, idx):
         if self.full_time_series:
