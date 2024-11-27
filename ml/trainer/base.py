@@ -180,6 +180,7 @@ class JointReconODETrainer(pl.LightningModule):
         xt_pred = self.decoder(zt)  # (b * n, c, h, w)
         recon_loss = self.recon(xt, xt_pred)  # reconstruction loss
 
+        # TODO: replace smoothness loss with OT motion prior
         smoothness_loss = 0.0
         last_z = torch.chunk(zt, self.n, dim=0)[0]
         zt_end_preds = []
@@ -232,8 +233,8 @@ class JointReconODETrainer(pl.LightningModule):
             # (time_steps, b, c, 1, 1)
             diff = torch.diff(z_evolution, dim=0)
             smoothness_loss += self.mse(
-                torch.sum(diff ** 2, dim=(0, -1, -2, -3)),
-                torch.sum((z_evolution[-1] - last_z) ** 2, dim=(1, 2, 3))
+                torch.sum(diff ** 2, dim=(0, -1, -2, -3)),  # sum of paths taken
+                torch.sum((z_evolution[-1] - last_z) ** 2, dim=(1, 2, 3))  # direct path
             )
             last_z = z_evolution[-1]
             zt_end_preds.append(last_z)
