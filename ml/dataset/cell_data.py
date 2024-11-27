@@ -32,13 +32,24 @@ class HeLaCells(VisionDataset):
         # get all the tracks, these are folders in the root_dir
         tracks = [d for d in root.iterdir() if d.is_dir() and re.match(r'Track\d+', d.name)]
         print(f'Found {len(tracks)} tracks')
+        # print the minimum and maximum number of images in a track
+        print(
+            'Min number of images:', min(
+                len(list(d.glob('*.png'))) for d in tracks
+            )
+        )
+        print(
+            'Max number of images:', max(
+                len(list(d.glob('*.png'))) for d in tracks
+            )
+        )
 
         if seed is not None:
             train_tracks, test_tracks = train_test_split(tracks, random_state=seed, test_size=test_size)
             tracks = train_tracks if split == 'train' else test_tracks
 
         self.all_images_per_track = {
-            track: sorted(list(track.glob('*.png')))
+            track: list(sorted(list(track.glob('*.png'))))
             for track in tracks
         }
         self.all_images_per_track = {
@@ -66,6 +77,7 @@ class HeLaCells(VisionDataset):
             transform = self.DEFAULT_TRANSFORM
 
         self.transform = transform
+        self.split = split
 
     def get_sampling_weights(self):
         return self.sample_weights
@@ -103,19 +115,24 @@ class HeLaCells(VisionDataset):
 class HeLaCellsSuccessive(HeLaCells):
 
     def __init__(
-            self, root, n_successive=1, split='train', seed=None, test_size=0.2, transform=None
+            self, root, n_successive=1, subsampling=1, split='train', seed=None, test_size=0.2, transform=None
     ):
         super(HeLaCellsSuccessive, self).__init__(root, split, seed, test_size, transform)
         self.n_successive = n_successive
+        self.subsampling = subsampling
 
         self.image_tracks = {}
+        mult = self.subsampling
         for track_id, (track, (images, start_time, end_time)) in enumerate(self.all_images_per_track.items()):
             self.image_tracks[track_id] = []
             for i in range(len(images) - n_successive):
+                if i + mult * n_successive + 1 > len(images):
+                    break
+
                 self.image_tracks[track_id].append(
                     (
-                        images[i:i + n_successive + 1],
-                        ((start_time + i) / end_time, (start_time + i + n_successive) / end_time)
+                        images[i:i + mult * n_successive + 1],
+                        ((start_time + i) / end_time, (start_time + i + n_successive * mult) / end_time)
                     )
                 )
 
@@ -133,6 +150,7 @@ class HeLaCellsSuccessive(HeLaCells):
             x, t = [torch.stack(x_i, dim=0) for x_i in x], [torch.stack(t_i, dim=0) for t_i in t]
             x, t = torch.concat(x, dim=0), torch.concat(t, dim=0)
             return x, t
+
         return collate_fn
 
     def __len__(self):
@@ -143,7 +161,7 @@ class HeLaCellsSuccessive(HeLaCells):
         # same a random successive track index
         rand_successive_frames = torch.randint(0, len(successive_tracks), (1,)).item()
         xs, times = successive_tracks[rand_successive_frames]
-        xs = [pil_loader(x).convert('L') for x in xs]
+        xs = [pil_loader(x).convert('L') for x in xs[::self.subsampling]]
         xs = [self.transform(x) for x in xs]
 
         # stack the images along a new dimension
@@ -152,10 +170,12 @@ class HeLaCellsSuccessive(HeLaCells):
 
 
 if __name__ == '__main__':
-    _n_successive = 3
+    import matplotlib.pyplot as plt
+
+    _n_successive = 7
     _ds = HeLaCellsSuccessive(
-        Path('..', '..', 'data'), seed=42,
-        split='train', test_size=0.2, n_successive=_n_successive,
+        Path('..', '..', 'data'), n_successive=_n_successive, subsampling=4,
+        split='train', test_size=0.2, seed=42,
     )
 
     print(_ds.get_tracks_selected())
@@ -176,3 +196,18 @@ if __name__ == '__main__':
     for _i in range(1):
         _x, _t = next(_dl)
         print(_x.shape, _t.shape)
+
+        skipper = _x.size(0) // (_n_successive + 1)
+
+        _x = _x[::skipper]
+        _t = _t[::skipper]
+
+        print(_x.shape, _t.shape)
+
+        _, _ax = plt.subplots(1, _n_successive + 1, figsize=(4 * (_n_successive + 1), 4))
+        for _i, (_x_i, _t_i) in enumerate(zip(_x, _t)):
+            _ax[_i].imshow(_x_i[0], cmap='gray')
+            _ax[_i].set_title(f'{_t_i:.2f}')
+            _ax[_i].axis('off')
+        plt.show()
+        plt.close()
