@@ -23,7 +23,20 @@ def get_bounding_box(mask):
     return x, y, w, h
 
 
-def process_tracks(data_dir):
+def process_tracks(data_dir, smooth_and_dilate_mask=False, extension='.png'):
+    r"""Given the raw cell data in data_dir, process it to several tracks. It saves the data in the same folder as
+    data_dir.
+
+    Args:
+
+        data_dir (path): the path where the raw data is stored. E.g. data/Fluo-N2DL-HeLa
+
+        smooth_and_dilate_mask (bool): whether we smooth and dilate the masks before using the masks to 'cut out' the
+        cells.
+
+        extension (str): the image extension to which we save the individual images in a track.
+
+    """
 
     # Load the man_track.txt
     track_dir = os.path.join(data_dir, "01_GT", "TRA")
@@ -227,7 +240,7 @@ def process_tracks(data_dir):
                     mask_bbox = mask_bbox[:, np.r_[b_lim_x:u_lim_x]]
 
                     # Pad the image with and track mask until we have a specific size
-                    target_shape = (64, 32)
+                    target_shape = (64, 32) # (64, 40)
                     img_in_bbox = np.pad(img_in_bbox, ((max(int((target_shape[0] - img_in_bbox.shape[0])/2), 0),
                                                      max(int((target_shape[0] - img_in_bbox.shape[0])/2), 0)),
                                                        (max(int((target_shape[1] - img_in_bbox.shape[1]) / 2), 0),
@@ -239,13 +252,17 @@ def process_tracks(data_dir):
                                                        max(int((target_shape[1] - mask_bbox.shape[1]) / 2), 0))))
 
                     # Make sure that outside the mask we smoothly go to a uniform background
-                    # kernel_size = 10 #int(num_additional_pixels/4)
-                    # kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-                    # dilation = cv2.morphologyEx(mask_bbox.astype('uint8'), cv2.MORPH_DILATE, kernel, borderType=cv2.BORDER_REPLICATE)
-                    # processed_mask = cv2.blur(255 * dilation.astype(np.float64),(kernel_size, kernel_size))
-                    # processed_mask = processed_mask / 255
-                    processed_image = background_color * (1.0 - mask_bbox) + mask_bbox * img_in_bbox.astype(np.float64)
-                    processed_image = processed_image.astype(img_in_bbox.dtype)
+                    if smooth_and_dilate_mask:
+                        kernel_size = 10 #int(num_additional_pixels/4)
+                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+                        dilation = cv2.morphologyEx(mask_bbox.astype('uint8'), cv2.MORPH_DILATE, kernel, borderType=cv2.BORDER_REPLICATE)
+                        processed_mask = cv2.blur(255 * dilation.astype(np.float64),(kernel_size, kernel_size))
+                        processed_mask = processed_mask / 255
+                        processed_image = background_color * (
+                                    1.0 - processed_mask) + processed_mask * img_in_bbox.astype(np.float64)
+                    else:
+                        processed_image = background_color * (1.0 - mask_bbox) + mask_bbox * img_in_bbox.astype(np.float64)
+                        processed_image = processed_image.astype(img_in_bbox.dtype)
 
                     # Then resize the image to the correct size
                     img_in_bbox = cv2.resize(processed_image, target_shape[::-1])
@@ -300,9 +317,16 @@ def process_tracks(data_dir):
                 concat_img = cv2.resize(concat_img, (2 * target_shape[1], target_shape[0]))
 
             # Save the image
-            img_obj = Image.fromarray((concat_img * 255).astype(np.uint8))
             time_label = "00"+str(time) if time < 10 else "0"+str(time)
-            save_filename = "track{}_t{}.png".format(label, time_label)
+            if extension == '.tif':
+                img_obj = Image.fromarray(concat_img)
+                save_filename = "track{}_t{}.tif".format(label, time_label)
+            elif extension == '.png':
+                img_obj = Image.fromarray((concat_img * 255).astype(np.uint8))
+                save_filename = "track{}_t{}.png".format(label, time_label)
+            else:
+                raise ValueError("Input extension is {} but can only be .tif or .png".format(extension))
+
             dirname = os.path.join(save_dir, "Track{}".format(label))
             if not os.path.isdir(dirname):
                 os.makedirs(dirname)
@@ -317,5 +341,7 @@ def process_tracks(data_dir):
 
 
 if __name__ == "__main__":
+    smooth_and_dilate_mask = False
+    extension = '.png'
     data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "Fluo-N2DL-HeLa")
-    process_tracks(data_dir)
+    process_tracks(data_dir, smooth_and_dilate_mask, extension)

@@ -31,7 +31,8 @@ class Encoder(torch.nn.Module):
             # Batch normalization
             if i > 0:
                 bn_name = 'bn' + str(i + 1)
-                self.hidden_layer.add_module(bn_name, torch.nn.BatchNorm2d(num_filters[i]))
+                #self.hidden_layer.add_module(bn_name, torch.nn.BatchNorm2d(num_filters[i]))
+                self.hidden_layer.add_module(bn_name, torch.nn.InstanceNorm2d(num_filters[i]))
 
             # Activation
             act_name = 'act' + str(i + 1)
