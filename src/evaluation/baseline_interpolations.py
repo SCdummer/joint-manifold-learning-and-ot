@@ -2,74 +2,22 @@
 import torch
 from wasserstein_barycenters import convolutional_barycenter_calculation
 
-# Import plotting libraries
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, PillowWriter
+# Import code used for making visualizations
+from src.visualization.create_recon_visualizations import create_time_series_gif
 
 # Import libraries for parsing inputs, for loading things, and for saving things
 import os
 import argparse
 import json
 
-# Import libraries for evaluating the image reconstruction quality
-from skimage.metrics import peak_signal_noise_ratio, structural_similarity, mean_squared_error
+# For calculating the reconstruction metrics
+from utils import create_summary_statistics, evaluate_time_series_recon
 
 # Code related to the datasets that we use
 from src.data.datasets import CellData
 
 # Remaining libraries
 import numpy as np
-
-def create_time_series_gif(time_series, bary_center_time_series, save_dir, recon_idx):
-
-    # Create a figure
-    fig, ax = plt.subplots(1, 2)
-
-    # Calculate the maximum value in the ground truth time series
-    max_val = time_series.max()
-
-    ### trajectory animation (gif)
-    def animate(i, time_series, bary_center_time_series):
-        ax[0].clear()
-        ax[1].clear()
-        p1 = ax[0].imshow(time_series[i].squeeze(), vmin=0, vmax=max_val)
-        p2 = ax[1].imshow(bary_center_time_series[i].squeeze(), vmin=0, vmax=max_val)
-        ax[0].set_title("Ground truth at time point {}".format(i))
-        ax[1].set_title("Reconstruction at time point {}".format(i))
-        return p1, p2
-
-    gif = FuncAnimation(fig, animate, fargs=(time_series, bary_center_time_series),
-                        blit=True, repeat=True, frames=time_series.shape[0], interval=1)
-    gif.save(os.path.join(save_dir, "BarycenterInterpolatedTimeSeries_{}.gif".format(recon_idx)), dpi=150, writer=PillowWriter(fps=5))
-    ax[0].clear()
-    ax[1].clear()
-
-    # Close the figures
-    plt.close('all')
-
-def evaluate_recon(time_series, time_series_recon, subsampling):
-
-    # We calculate the PSNR, SSIM, and L2 reconstruction metrics along with their variance / standard deviation. We
-    # save all the values in a dict of lists.
-    metric_list = {}
-    metric_list['PSNR'] = []
-    metric_list['SSIM'] = []
-    metric_list['MSE'] = []
-
-    # For every image in the time series, do ...
-    for i in range(time_series.shape[0]):
-
-        # Skip the time series for seen time points
-        if i % subsampling == 0:
-            continue
-
-        # Else, we calculate the reconstruction metrics
-        metric_list['PSNR'].append(peak_signal_noise_ratio(time_series[i].squeeze(), time_series_recon[i].squeeze()))
-        metric_list['SSIM'].append(structural_similarity(time_series[i].squeeze(), time_series_recon[i].squeeze(), data_range=1.0))
-        metric_list['MSE'].append(mean_squared_error(time_series[i].squeeze(), time_series_recon[i].squeeze()))
-
-    # Return the metric list
-    return metric_list
 
 def barycenter_based_interpolation(time_series, subsampling, save_dir, recon_idx, barycenter_type='OT'):
 
@@ -134,10 +82,10 @@ def barycenter_based_interpolation(time_series, subsampling, save_dir, recon_idx
         bary_center_time_series[t::subsampling] = barycenters
 
     # Finally, we plot create a gif of the barycenter and save it
-    create_time_series_gif(torch.tensor(time_series_normalized), bary_center_time_series, save_dir, recon_idx)
+    create_time_series_gif(torch.tensor(time_series_normalized), bary_center_time_series, save_dir, recon_idx, "BarycenterInterpolatedTimeSeries")
 
     # Evaluate the reconstruction capability
-    metric_list = evaluate_recon(time_series_normalized, bary_center_time_series.numpy(), subsampling)
+    metric_list = evaluate_time_series_recon(time_series_normalized, bary_center_time_series.numpy(), subsampling)
 
     # Return the reconstruction values
     return metric_list
@@ -159,26 +107,7 @@ def ot_interpolation_time_series(data_source, subsampling, save_dir, barycenter_
                                                             barycenter_type) for i in range(num_time_series)}
 
     # Finally, for every metric calculate the average and the standard deviation and save the important values
-    metric_statistics = {}
-    for metric in ["PSNR", "SSIM", "MSE"]:
-
-        # Initialize the dictionary corresponding to the key 'metric'.
-        metric_statistics[metric] = {}
-
-        # Get the values to only the current metric
-        metric_vals = [val for track in track_metric_vals.keys() for val in track_metric_vals[track][metric]]
-
-        # Calculate the mean, median, maximum, minimum, and standard deviation
-        metric_statistics[metric]['mean'] = np.mean(metric_vals)
-        metric_statistics[metric]['median'] = np.median(metric_vals)
-        metric_statistics[metric]['max'] = np.max(metric_vals)
-        metric_statistics[metric]['min'] = np.min(metric_vals)
-        metric_statistics[metric]['std'] = np.std(metric_vals)
-
-    # Save the statistics into a file
-    with open(os.path.join(save_dir, "evaluation_metric_statistics.json"), "w") as f:
-        json.dump(metric_statistics, f, indent=5)
-
+    create_summary_statistics(track_metric_vals, save_dir)
 
 if __name__ == "__main__":
     torch.random.manual_seed(31359)
