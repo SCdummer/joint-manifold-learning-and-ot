@@ -9,11 +9,11 @@ import logging
 import argparse
 import datetime
 import os
-import json
 from tqdm import trange
-import warnings
 
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+# Import own created saving and loading functions
+from src.utils.loading_and_saving import (create_code_snapshot, load_experiment_specifications,
+                                          save_model_and_optimizer, load_model, load_optimizer)
 
 # Load the models
 from src.models.encoders import Encoder
@@ -35,41 +35,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 # Define some loss functions
-recon_loss = nn.MSELoss() #nn.L1Loss() # nn.MSELoss() # nn.BCELoss()
+recon_loss = nn.MSELoss() #nn.MSELoss() #nn.L1Loss() # nn.MSELoss() # nn.BCELoss()
 wasserstein_dist = FastConvolutionalW2Cost()
-
-def create_code_snapshot(root, dst_path, extensions=(".py", ".json"), exclude=()):
-    """Creates tarball with the source code"""
-    import tarfile
-    from pathlib import Path
-
-    with tarfile.open(str(dst_path), "w:gz") as tar:
-        for path in Path(root).rglob("*"):
-            if '.git' in path.parts:
-                continue
-            exclude_flag = False
-            if len(exclude) > 0:
-                for k in exclude:
-                    if k in path.parts:
-                        exclude_flag = True
-            if exclude_flag:
-                continue
-            if path.suffix.lower() in extensions:
-                tar.add(path.as_posix(), arcname=path.relative_to(root).as_posix(), recursive=True)
-
-
-def load_experiment_specifications(experiment_directory):
-
-    filename = os.path.join(experiment_directory, 'specs.json')
-
-    if not os.path.isfile(filename):
-        raise Exception(
-            "The experiment directory ({}) does not include specifications file "
-            + '"specs.json"'.format(experiment_directory)
-        )
-
-    return json.load(open(filename))
-
 
 def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr, joint_learning=True):
 
@@ -86,89 +53,6 @@ def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr,
     # Return them
     return optimizer_all, scheduler
 
-
-def get_model_params_dir(experiment_dir, model_name, static_or_dynamic, create_if_nonexistent=False):
-
-    subdir = "static" if static_or_dynamic == 'static' else "dynamic"
-    dir = os.path.join(experiment_dir, "ModelParameters", model_name, subdir)
-
-    if create_if_nonexistent and not os.path.isdir(dir):
-        os.makedirs(dir)
-
-    return dir
-
-def get_optimizer_params_dir(experiment_dir, static_or_dynamic='static', create_if_nonexistent=False):
-
-    subdir = "static" if static_or_dynamic == 'static' else "dynamic"
-    dir = os.path.join(experiment_dir, "OptimizerParameters", subdir)
-
-    if create_if_nonexistent and not os.path.isdir(dir):
-        os.makedirs(dir)
-
-    return dir
-
-def save_model(experiment_directory, filename, model, model_name, static_or_dynamic, epoch):
-
-    model_params_dir = get_model_params_dir(experiment_directory, model_name, static_or_dynamic,True)
-
-    torch.save(
-        {"epoch": epoch, "model_state_dict": model.state_dict()},
-        os.path.join(model_params_dir, filename),
-    )
-
-def save_optimizer(experiment_directory, filename, optimizer, static_or_dynamic, epoch):
-
-    optimizer_params_dir = get_optimizer_params_dir(experiment_directory, static_or_dynamic,True)
-
-    torch.save(
-        {"epoch": epoch, "optimizer_state_dict": optimizer.state_dict()},
-        os.path.join(optimizer_params_dir, filename),
-    )
-
-def save_model_and_optimizer(experiment_directory, static_or_dynamic, epoch, encoder, decoder, time_warper, optimizer, filename='latest.pth'):
-    save_model(experiment_directory, filename, decoder, 'decoder', static_or_dynamic, epoch)
-    save_model(experiment_directory, filename, encoder, 'encoder', static_or_dynamic, epoch)
-    if static_or_dynamic == 'dynamic':
-        save_model(experiment_directory, filename, time_warper, 'time_warper', 'dynamic', epoch)
-    save_optimizer(experiment_directory, filename, optimizer, static_or_dynamic, epoch)
-
-def load_model(experiment_directory, model, model_name, static_or_dynamic, checkpoint_filename):
-
-    # Get the name of the file which is used to load the parameters
-    substring = "static" if static_or_dynamic == 'static' else "dynamic"
-    filename = os.path.join(experiment_directory, "ModelParameters", model_name, substring, checkpoint_filename)
-
-    if not os.path.isfile(filename):
-        warnings.warn('model state dict "{}" does not exist'.format(filename))
-        return 0
-
-    # Load the parameters
-    data = torch.load(filename)
-
-    # Put the parameters into the model
-    model.load_state_dict(data["model_state_dict"])
-
-    # Return the epoch at which the model was saved
-    return data["epoch"]
-
-def load_optimizer(experiment_directory, optimizer, static_or_dynamic, checkpoint_filename, device):
-
-    # Get the filename of the file containing the optimizer parameters
-    substring = "static" if static_or_dynamic == 'static' else "dynamic"
-    filename = os.path.join(experiment_directory, "OptimizerParameters", substring, checkpoint_filename)
-
-    if not os.path.isfile(filename):
-        warnings.warn('model state dict "{}" does not exist'.format(filename))
-        return 0
-
-    # Load the parameters
-    data = torch.load(filename, map_location=device)
-
-    # Put the parameters into the optimizer
-    optimizer.load_state_dict(data["optimizer_state_dict"])
-
-    # Return the epoch at which the optimizer was saved
-    return data["epoch"]
 
 def create_time_series_gif(recon_tensor, gt_tensor, save_dir, recon_idx):
 
@@ -387,7 +271,17 @@ def vae_recon_loss(img, img_recon, mu_z, log_var_z):
     recon_loss_val = 0.5 * recon_loss_no_reduc(img.reshape(img.shape[0], -1), img_recon.reshape(img_recon.shape[0], -1)).sum(dim=-1)
     KLD = -0.5 * torch.sum(1 + log_var_z - mu_z.pow(2) - log_var_z.exp(), dim=-1)
     weighting_factor = 1.0 / (img.reshape(img.shape[0], -1).shape[-1])
-    return (recon_loss_val + KLD).mean(dim=0) * weighting_factor, recon_loss_val.mean(dim=0) * weighting_factor, KLD.mean(dim=0) * weighting_factor
+    return (recon_loss_val + 0.005 * KLD).mean(dim=0) * weighting_factor, recon_loss_val.mean(dim=0) * weighting_factor, KLD.mean(dim=0) * weighting_factor
+
+
+def grad_encoder_loss(img, z):
+    grad = torch.autograd.grad(outputs=z,
+                               inputs=img,
+                               grad_outputs=torch.ones_like(z).to(z.device),
+                               create_graph=True,
+                               retain_graph=True)[0].reshape(z.shape[0], -1)
+    return (torch.norm(grad, dim=-1) ** 2).mean()
+
 
 def train_model(experiment_directory):
 
@@ -594,7 +488,8 @@ def train_model(experiment_directory):
                     loss_recon_static_2 = recon_loss(img_2, img_2_recon_static)
                     loss_recon_dynamic =  recon_loss(img_2, img_2_recon_dynamic)
                     loss_recon_static = 0.5 * (loss_recon_static_1 + loss_recon_static_2)
-                    loss_recon = 2.0 * loss_recon_static + 0.0 * loss_recon_dynamic
+                    latent_regularizer = torch.tensor(0.0).to(device)
+                    loss_recon = 2.0 * loss_recon_static + 10.0 * loss_recon_dynamic
                 else:
                     vae_loss_static_1, loss_recon_static_1, _ = vae_recon_loss(img_1, img_1_recon, mu_start, log_var_start)
                     vae_loss_static_1, loss_recon_static_2, _ = vae_recon_loss(img_2, img_2_recon_static, mu_end, log_var_end)
@@ -615,8 +510,12 @@ def train_model(experiment_directory):
             # TODO: Implement the OT motion loss prior
             loss_motion_prior = torch.tensor(0.0, device=device)
 
+            # # Use a gradient loss of the decoder
+            # grad_loss = 0.5 * grad_encoder_loss(img_1, z_start)
+            # grad_loss += 0.5 * grad_encoder_loss(img_2, z_end)
+
             # Calculate the full loss
-            loss = loss_recon + loss_latent_recon + lambda_dyn_reg * loss_motion_prior + latent_regularizer
+            loss = loss_recon + loss_latent_recon + lambda_dyn_reg * loss_motion_prior + 0.0 * latent_regularizer #+ 0.05 * grad_loss
 
             # Update the parameters
             loss.backward()
@@ -665,14 +564,61 @@ if __name__ == "__main__":
 # img_left_recon = decoder(z_left)
 # img_right_recon = decoder(z_right)
 
+##################################################
+### Some code for creating a latent space plot ###
+##################################################
+
 # # Reconstruct all of the time points
 # recon_list = []
-# z_t = z_start[None, ...] * (1 - t[:, None, None, None, None]) + t[:, None, None, None, None] * z_end[None, ...]
-# for i in range(2*num_int_steps):
+# t = torch.linspace(0, 0.5, 11).to('cuda')
+# z_t = z_start[None, ...] * (1 - t[:, None, None]) + t[:, None, None] * z_end[None, ...]
+# z_t = z_dynamic_end[None, ...] * (1 - t[:, None, None]) + t[:, None, None] * z_end[None, ...]
+# for i in range(t.size(0)):
 #     z_i = z_t[i, 3, ...][None, ...]
 #     recon_list.append(decoder(z_i).squeeze().detach().cpu().numpy())
 #     plt.imshow(recon_list[-1])
 #     plt.show()
+#
+# # Plotting the latent space
+# fig, ax = plt.subplots()
+# latent_dataloader = DataLoader(CellData(specs["DataSource"], time_step=5, dynamic=True, full_time_series=True), batch_size=1)
+# cmap = plt.cm.get_cmap('hsv', len(latent_dataloader))
+# for i, time_series in enumerate(latent_dataloader):
+#
+#     if i % 1 == 0:
+#         batch = time_series.squeeze().unsqueeze(1)
+#         _, z_thing, _ = encoder(batch.to('cuda'))
+#
+#         end_time = nabla_t * time_subsampling * (z_thing.size(0) - 1)
+#         t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling * (z_thing.size(0) - 1) + 1).to(device)
+#         # z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
+#         z_t_thing = time_warper(z_thing[0, ...][None, ...], t)
+#         #print(z_t_thing.shape)
+#         z_t_thing = torch.cat([z_t_thing[0, ...][None,...], z_t_thing[time_subsampling::time_subsampling]],dim=0)
+#         #print(z_t_thing.shape)
+#         #print("YEEEEEE")
+#         one_step_pred = time_warper(z_thing, torch.linspace(0.0, nabla_t * time_subsampling, num_int_steps * time_subsampling + 1).to(device))
+#         #print(one_step_pred.size())
+#         #print(z_thing.size())
+#         #print("t")
+#         one_step_pred = torch.cat([z_thing[0, ...][None, ...], one_step_pred[-1, ...][:-1, ...]], dim=0)
+#         #print("t")
+#         z_thing = z_thing.detach().cpu().numpy()
+#         z_t_thing = z_t_thing.detach().cpu().numpy().squeeze()
+#         one_step_pred = one_step_pred.detach().cpu().numpy().squeeze()
+#         #print("t")
+#         ax.scatter(z_thing[:, 0], z_thing[:, 1], s=60, c=cmap(i))#c='b')#cmap(i))
+#         #ax.scatter(z_t_thing[:, 0], z_t_thing[:, 1], s=5, c='black', marker='*')#)cmap(i), marker="x")
+#         #print(one_step_pred.shape)
+#         ax.scatter(one_step_pred[:, 0], one_step_pred[:, 1], s=5, c='black', marker='x')#c='g')#cmap(len(latent_dataloader)-i-1), marker="*")
+#
+# plt.show()
+# plt.close('all')
+#
+
+
+
+
 #
 # # Normalize the intermediate images for calculating the motion prior loss
 # idx_1, idx_2 = 9, 10
