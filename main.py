@@ -80,10 +80,10 @@ def prepare_ds_and_dls(cfg, dataset_class):
         test_ds = None
 
     t_sampler = torch.utils.data.WeightedRandomSampler(
-        train_ds.get_sampling_weights(), 500, replacement=True
+        train_ds.get_sampling_weights(), 256, replacement=True
     )
     v_sampler = torch.utils.data.WeightedRandomSampler(
-        val_ds.get_sampling_weights(), 16 * cfg.batch_size, replacement=True
+        val_ds.get_sampling_weights(), 8 * cfg.batch_size, replacement=True
     )
 
     t_dl, v_dl = [
@@ -148,7 +148,8 @@ if __name__ == '__main__':
     dataloader_seed = int.from_bytes(os.urandom(4), 'little')
 
     for (_dataset, epochs) in [('HeLa', 100)]:
-        n = 3
+        n = 7
+        sub_s = 4
         num_channels = 1 if _dataset in ['HeLa'] else 3
         b_s = 64 // (n + 1)
         wd_recon = 1e-4
@@ -175,8 +176,8 @@ if __name__ == '__main__':
             },
             'dataset': {
                 'name': _dataset,
-                'train': {'split': 'train', 'seed': split_seed, 'n_successive': n},
-                'val': {'split': 'val', 'seed': split_seed, 'n_successive': n},
+                'train': {'split': 'train', 'seed': split_seed, 'n_successive': n, 'subsampling': sub_s},
+                'val': {'split': 'val', 'seed': split_seed, 'n_successive': n, 'subsampling': sub_s},
             },
             'data_dir': os.path.join('.', 'data'),
             'batch_size': b_s,
