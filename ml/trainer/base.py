@@ -4,12 +4,11 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-import wandb
 import torchmetrics
 import lightning as pl
 import matplotlib.pyplot as plt
 
-from ml.optim import init_optims_from_config
+from ml.optim import init_optims_from_config, get_regulariser
 
 
 class MSSSIML1Loss(torch.nn.Module):
@@ -139,9 +138,12 @@ class JointReconODETrainer(pl.LightningModule):
 
         # set the loss function
         # self.recon = MSSSIML1Loss(gaussian_sigmas=(0.5, 1.0, 2.0))
-        self.recon = torch.nn.SmoothL1Loss()
+        self.recon = torch.nn.HuberLoss()
         self.mse = torch.nn.MSELoss()
         self.koleo = KoleoLoss()
+        self.ot_regulariser = get_regulariser(
+            'ot', scaling= 0.7, use_pykeops=True, n_per_eps=1, n_extra_last_scale=14
+        )
 
         # set the normalisation function
         self.normalisation = normalisation
@@ -157,11 +159,12 @@ class JointReconODETrainer(pl.LightningModule):
         self.dir_name = Path(self.config.logging_path, 'val_images')
         os.makedirs(self.dir_name, exist_ok=True)
 
-    def metric_log(self, prefix, loss, l_loss, r_loss, dm_loss, s_loss, x_pred, x_gt):
+    def metric_log(self, prefix, loss, l_loss, r_loss, dm_loss, s_loss, ot_loss, x_pred, x_gt):
         self.log(f'{prefix}/loss', loss, prog_bar=True, on_epoch=prefix == 'val', on_step=prefix == 'train')
-        self.log(f'{prefix}/tevol', l_loss, prog_bar=True, on_epoch=True, on_step=False)
         self.log(f'{prefix}/rec', r_loss, prog_bar=True, on_epoch=True, on_step=False)
         self.log(f'{prefix}/dm', dm_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log(f'{prefix}/ot', ot_loss, prog_bar=True, on_epoch=True, on_step=False)
+        self.log(f'{prefix}/tevol', l_loss, prog_bar=True, on_epoch=True, on_step=False)
         self.log(f'{prefix}/sm', s_loss, prog_bar=True, on_epoch=True, on_step=False)
         if prefix == 'train':
             metrics = self.train_metrics
@@ -180,21 +183,26 @@ class JointReconODETrainer(pl.LightningModule):
         xt_pred = self.decoder(zt)  # (b * n, c, h, w)
         recon_loss = self.recon(xt, xt_pred)  # reconstruction loss
 
-        # TODO: replace smoothness loss with OT motion prior
-        smoothness_loss = 0.0
+        ot_loss = []
+        smoothness_loss = 0.
         last_z = torch.chunk(zt, self.n, dim=0)[0]
         zt_end_preds = []
         for _ in range(1, self.n):
-            z_evolution = self.neural_ode(last_z)
-            # (time_steps, b, c, 1, 1)
+            z_evolution, z_at_rand_step = self.neural_ode(last_z)  # (time_steps, b, c, 1, 1), (2, b, c, 1, 1)
+            last_z = z_evolution[-1]
+            zt_end_preds.append(last_z)
             diff = torch.diff(z_evolution, dim=0)
             smoothness_loss += self.mse(
                 torch.sum(diff ** 2, dim=(0, -1, -2, -3)),
                 torch.sum((z_evolution[-1] - last_z) ** 2, dim=(1, 2, 3))
             )
-            last_z = z_evolution[-1]
-            zt_end_preds.append(last_z)
+            x_at_rand_minus, x_at_rand_plus = self.decoder(z_at_rand_step[0]), self.decoder(z_at_rand_step[1])
+            x_at_rand_minus = torch.clamp(self.de_normalisation(x_at_rand_minus), 0, 1)
+            x_at_rand_plus = torch.clamp(self.de_normalisation(x_at_rand_plus), 0, 1)
+            ot_loss.append(self.ot_regulariser(x_at_rand_minus, x_at_rand_plus) / 0.01)
+
         smoothness_loss = smoothness_loss / (self.n - 1)
+        ot_loss = torch.mean(torch.stack(ot_loss))
 
         zt_end_preds = torch.concat(zt_end_preds, dim=0)  # (b * (n - 1), c, 1, 1)
         xt_end_preds = self.decoder(zt_end_preds)  # (b * (n - 1), c, h, w)
@@ -206,11 +214,11 @@ class JointReconODETrainer(pl.LightningModule):
         xt_end = torch.concat(torch.chunk(xt, self.n, dim=0)[1:], dim=0)
         data_match_loss = self.recon(xt_end, xt_end_preds)  # the predicted images should be close to the actual images
 
-        loss = (recon_loss + 0.1 * _koleo) + (data_match_loss + 0.1 * smoothness_loss) + 10 * l_loss
+        loss = (recon_loss + 0.1 * _koleo) + (data_match_loss + 0.1 * ot_loss) + 10 * l_loss
 
         self.metric_log(
             prefix='train',
-            loss=loss, l_loss=l_loss, r_loss=recon_loss, dm_loss=data_match_loss, s_loss=smoothness_loss,
+            loss=loss, l_loss=l_loss, r_loss=recon_loss, dm_loss=data_match_loss, s_loss=smoothness_loss, ot_loss=ot_loss,
             x_pred=xt_end_preds, x_gt=xt_end
         )
 
@@ -225,20 +233,26 @@ class JointReconODETrainer(pl.LightningModule):
         xt_pred = self.decoder(zt)  # (b * n, c, h, w)
         recon_loss = self.recon(xt, xt_pred)  # reconstruction loss
 
-        smoothness_loss = 0.0
+        ot_loss = []
+        smoothness_loss = 0.
         last_z = torch.chunk(zt, self.n, dim=0)[0]
         zt_end_preds = []
         for _ in range(1, self.n):
-            z_evolution = self.neural_ode(last_z)
-            # (time_steps, b, c, 1, 1)
-            diff = torch.diff(z_evolution, dim=0)
-            smoothness_loss += self.mse(
-                torch.sum(diff ** 2, dim=(0, -1, -2, -3)),  # sum of paths taken
-                torch.sum((z_evolution[-1] - last_z) ** 2, dim=(1, 2, 3))  # direct path
-            )
+            z_evolution, z_at_rand_step = self.neural_ode(last_z)  # (time_steps, b, c, 1, 1), (2, b, c, 1, 1)
             last_z = z_evolution[-1]
             zt_end_preds.append(last_z)
+            diff = torch.diff(z_evolution, dim=0)
+            smoothness_loss += self.mse(
+                torch.sum(diff ** 2, dim=(0, -1, -2, -3)),
+                torch.sum((z_evolution[-1] - last_z) ** 2, dim=(1, 2, 3))
+            )
+            x_at_rand_minus, x_at_rand_plus = self.decoder(z_at_rand_step[0]), self.decoder(z_at_rand_step[1])
+            x_at_rand_minus = torch.clamp(self.de_normalisation(x_at_rand_minus), 0, 1)
+            x_at_rand_plus = torch.clamp(self.de_normalisation(x_at_rand_plus), 0, 1)
+            ot_loss.append(self.ot_regulariser(x_at_rand_minus, x_at_rand_plus) / 0.01)
+
         smoothness_loss = smoothness_loss / (self.n - 1)
+        ot_loss = torch.mean(torch.stack(ot_loss))
 
         zt_end_preds = torch.concat(zt_end_preds, dim=0)  # (b * (n - 1), c, 1, 1)
         xt_end_preds = self.decoder(zt_end_preds)  # (b * (n - 1), c, h, w)
@@ -254,7 +268,7 @@ class JointReconODETrainer(pl.LightningModule):
 
         self.metric_log(
             prefix='val',
-            loss=loss, l_loss=l_loss, r_loss=recon_loss, dm_loss=data_match_loss, s_loss=smoothness_loss,
+            loss=loss, l_loss=l_loss, r_loss=recon_loss, dm_loss=data_match_loss, s_loss=smoothness_loss, ot_loss=ot_loss,
             x_pred=xt_end_preds, x_gt=xt_end
         )
 
