@@ -159,7 +159,7 @@ if __name__ == '__main__':
 
         _cfg = {
             'seed': lightning_seed,
-            'run_name': f'{run_name}_joint',
+            'run_name': f'{run_name}_joint_ot_reg',
             'project': f'{_dataset}',
             'run_id': None,
             'training': {
