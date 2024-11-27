@@ -2,8 +2,10 @@ import re
 from pathlib import Path
 
 import torch
+import numpy as np
 import torchvision.transforms as T
 
+from PIL import Image
 from sklearn.model_selection import train_test_split
 from torchvision.datasets import VisionDataset
 from torchvision.datasets.folder import pil_loader
@@ -15,15 +17,20 @@ from ml.util import register
 class HeLaCells(VisionDataset):
     IMG_SIZE = (64, 64)
 
-    NORMALIZE = T.Normalize(mean=[0.02108], std=[0.07335])
-    DE_NORMALIZE = T.Normalize(mean=[-0.02108 / 0.07335], std=[1 / 0.07335])
-
     DEFAULT_TRANSFORM = T.Compose([
         T.ToTensor(),
     ])
 
     BASE_FOLDER = 'Fluo-N2DL-HeLa'
     TRACKS_FOLDER = '01_processed'
+
+    EXTENSION = 'tif' if TRACKS_FOLDER == '01_processed_c' else 'png'
+    if TRACKS_FOLDER == '01_processed_c':
+        NORMALIZE = T.Normalize(mean=[0.039523557904693814], std=[0.09271456955207719])
+        DE_NORMALIZE = T.Normalize(mean=[-0.039523557904693814 / 0.09271456955207719], std=[1 / 0.09271456955207719])
+    else:
+        NORMALIZE = T.Normalize(mean=[0.02108], std=[0.07335])
+        DE_NORMALIZE = T.Normalize(mean=[-0.02108 / 0.07335], std=[1 / 0.07335])
 
     def __init__(self, root, split='train', seed=None, test_size=0.2, transform=None):
         root = Path(root, self.BASE_FOLDER, self.TRACKS_FOLDER)
@@ -35,12 +42,12 @@ class HeLaCells(VisionDataset):
         # print the minimum and maximum number of images in a track
         print(
             'Min number of images:', min(
-                len(list(d.glob('*.png'))) for d in tracks
+                len(list(d.glob(f'*.{self.EXTENSION}'))) for d in tracks
             )
         )
         print(
             'Max number of images:', max(
-                len(list(d.glob('*.png'))) for d in tracks
+                len(list(d.glob(f'*.{self.EXTENSION}'))) for d in tracks
             )
         )
 
@@ -49,14 +56,14 @@ class HeLaCells(VisionDataset):
             tracks = train_tracks if split == 'train' else test_tracks
 
         self.all_images_per_track = {
-            track: list(sorted(list(track.glob('*.png'))))
+            track: list(sorted(list(track.glob(f'*.{self.EXTENSION}'))))
             for track in tracks
         }
         self.all_images_per_track = {
             track: (
                 images,
-                int(re.match(r'track(\d+)_t(\d+).png', images[0].name).group(2)),
-                int(re.match(r'track(\d+)_t(\d+).png', images[-1].name).group(2))
+                int(re.match(rf'track(\d+)_t(\d+).{self.EXTENSION}', images[0].name).group(2)),
+                int(re.match(rf'track(\d+)_t(\d+).{self.EXTENSION}', images[-1].name).group(2))
             )
             for track, images in self.all_images_per_track.items()
         }
@@ -135,6 +142,7 @@ class HeLaCellsSuccessive(HeLaCells):
                         ((start_time + i) / end_time, (start_time + i + n_successive * mult) / end_time)
                     )
                 )
+        self.flat_image_tracks = sum(self.image_tracks.values(), [])
 
     def get_sampling_weights(self):
         return list(self.track_weights.values())
@@ -154,14 +162,19 @@ class HeLaCellsSuccessive(HeLaCells):
         return collate_fn
 
     def __len__(self):
-        return len(self.image_tracks)
+        return len(self.image_tracks) if self.n_successive > 0 else len(self.flat_image_tracks)
 
     def __getitem__(self, idx):
-        successive_tracks = self.image_tracks[idx]
-        # same a random successive track index
-        rand_successive_frames = torch.randint(0, len(successive_tracks), (1,)).item()
-        xs, times = successive_tracks[rand_successive_frames]
-        xs = [pil_loader(x).convert('L') for x in xs[::self.subsampling]]
+        if self.n_successive != 0:
+            successive_tracks = self.image_tracks[idx]
+            # same a random successive track index
+            rand_successive_frames = torch.randint(0, len(successive_tracks), (1,)).item()
+            xs, times = successive_tracks[rand_successive_frames]
+        else:
+            xs, times = self.flat_image_tracks[idx]
+        xs = [np.array(Image.open(x), dtype=np.float32)[..., None] / 255. for x in xs[::self.subsampling]]
+        # min_xs, max_xs = np.min(xs), np.max(xs)
+        # xs = [(x - min_xs) / (max_xs - min_xs) for x in xs]
         xs = [self.transform(x) for x in xs]
 
         # stack the images along a new dimension
@@ -172,10 +185,10 @@ class HeLaCellsSuccessive(HeLaCells):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
-    _n_successive = 7
+    _n_successive = 0
     _ds = HeLaCellsSuccessive(
-        Path('..', '..', 'data'), n_successive=_n_successive, subsampling=4,
-        split='train', test_size=0.2, seed=42,
+        Path('..', '..', 'data'), n_successive=_n_successive, subsampling=1,
+        split='train', test_size=0.2, seed=None,
     )
 
     print(_ds.get_tracks_selected())
@@ -183,18 +196,23 @@ if __name__ == '__main__':
 
     _dl = iter(
         torch.utils.data.DataLoader(
-            _ds, batch_size=16 // (_n_successive + 1),
-            sampler=torch.utils.data.WeightedRandomSampler(
-                _ds.get_sampling_weights(), 200, replacement=True
-            ),
+            _ds, batch_size=64 // (_n_successive + 1),
+            # sampler=torch.utils.data.WeightedRandomSampler(
+            #     _ds.get_sampling_weights(), 200, replacement=True
+            # ),
             collate_fn=_ds.get_collate_fn()
         )
     )
 
     print(repr(_ds))
 
-    for _i in range(1):
+    mean, std = 0, 0
+    for _i in range(len(_dl)):
         _x, _t = next(_dl)
+        mean += torch.mean(_x).item()
+        std += torch.std(_x).item()
+        continue
+
         print(_x.shape, _t.shape)
 
         skipper = _x.size(0) // (_n_successive + 1)
@@ -206,8 +224,12 @@ if __name__ == '__main__':
 
         _, _ax = plt.subplots(1, _n_successive + 1, figsize=(4 * (_n_successive + 1), 4))
         for _i, (_x_i, _t_i) in enumerate(zip(_x, _t)):
-            _ax[_i].imshow(_x_i[0], cmap='gray')
+            print(f'Min: {torch.min(_x_i[0])}, Max: {torch.max(_x_i[0])}')
+            _normed_xi = (_x_i[0] - torch.min(_x_i[0])) / (torch.max(_x_i[0]) - torch.min(_x_i[0]))
+            _ax[_i].imshow(_normed_xi, cmap='gray')
             _ax[_i].set_title(f'{_t_i:.2f}')
             _ax[_i].axis('off')
         plt.show()
         plt.close()
+
+    print(mean / len(_dl), std / len(_dl))
