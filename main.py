@@ -1,3 +1,4 @@
+from pathlib import Path
 from pprint import pprint
 
 import torch
@@ -5,20 +6,31 @@ import wandb
 import torchmetrics
 import lightning as pl
 
+from lightning.pytorch.loggers import CSVLogger
 from torch.utils.data import DataLoader
 
 from ml.util import REGISTRY
-from ml.optim import get_loss
-from ml.trainer import BaseTrainer, ODETrainer, JointReconODETrainer, MyWandBLogger
+from ml.trainer import JointReconODETrainer, MyWandBLogger
 
 
-def train_recon(cfg, fast_dev_run=False):
-    logger = MyWandBLogger(
+def prepare_lightning(cfg, fast_dev_run):
+    wandb_logger = MyWandBLogger(
         name=cfg.run_name, project=cfg.project, log_model='all', id=cfg.run_id, allow_val_change=True
     )
-    logger.experiment
+    wandb_logger.experiment
+    if wandb.run:
+        _id = wandb.run.id
+    else:
+        import uuid
+        _id = uuid.uuid4().hex
+    cfg.logging_path = Path('.', 'out', f'{_id}')
+    cfg.logging_path.mkdir(parents=True, exist_ok=True)
+
+    model_logging_path = cfg.logging_path / 'model'
+    model_logging_path.mkdir(parents=True, exist_ok=True)
+
     model_checkpoint_callback = pl.pytorch.callbacks.ModelCheckpoint(
-        dirpath=wandb.run.dir if logger.experiment else None,
+        dirpath=wandb.run.dir if wandb_logger.experiment else model_logging_path,
         monitor=cfg.training.metric_to_monitor,
         mode=cfg.training.metric_mode,
         save_top_k=cfg.training.save_top_k,
@@ -26,7 +38,10 @@ def train_recon(cfg, fast_dev_run=False):
         filename='model_best',
     )
     trainer = pl.Trainer(
-        logger=logger,
+        logger=[
+            wandb_logger,
+            CSVLogger(save_dir=cfg.logging_path, name='logs')
+        ],
         callbacks=[
             model_checkpoint_callback,
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),
@@ -41,110 +56,24 @@ def train_recon(cfg, fast_dev_run=False):
         benchmark=cfg.training.benchmark,
         max_epochs=cfg.training.max_epochs,
         fast_dev_run=fast_dev_run,
-        log_every_n_steps=1,
+        log_every_n_steps=5,
+        check_val_every_n_epoch=5,
     )
+    return model_checkpoint_callback, trainer
 
-    dataset_class = REGISTRY['dataset'].get(cfg.dataset.name)
 
-    train_ds = dataset_class(root=cfg.data_dir, **cfg.dataset.train)
-    val_ds = dataset_class(root=cfg.data_dir, **cfg.dataset.val)
-
-    if 'test' in cfg.dataset:
-        test_ds = dataset_class(root=cfg.data_dir, **cfg.dataset.test)
-    else:
-        test_ds = None
-
-    t_dl, v_dl = [
-        DataLoader(
-            dataset=ds, batch_size=cfg.batch_size, num_workers=num_w, shuffle=shuffle,
-            pin_memory=True, persistent_workers=True, drop_last=skip_last,
-            generator=torch.Generator().manual_seed(cfg.training.dataloader_seed) if shuffle else None,
-            collate_fn=dataset_class.get_collate_fn()
-        )
-        for ds, num_w, shuffle, skip_last in [(train_ds, cfg.num_workers, True, True), (val_ds, 1, False, False)]
-    ]
-
-    test_dl = DataLoader(
-        dataset=test_ds, batch_size=cfg.batch_size, num_workers=1, shuffle=False,
-        pin_memory=True, persistent_workers=True, drop_last=False, collate_fn=dataset_class.get_collate_fn()
-    ) if test_ds else None
-
+def update_num_steps_lr_scheduler(cfg, t_dl):
     # handle varying batch sizes and training steps so that it does not have to be hardcoded
     for _lr_n, _lr_p, _lr_i in zip(cfg.lr_scheduler.name, cfg.lr_scheduler.params, cfg.lr_scheduler.interval):
         if _lr_n == 'get_cosine_schedule_with_warmup':
             _lr_p['num_warmup_steps'] = int(_lr_p['num_warmup_steps'] * len(t_dl))
             _lr_p['num_training_steps'] = int(_lr_p['num_training_steps'] * len(t_dl)) + 1
-
     wandb.config.update(cfg.to_dict())
 
-    pprint(cfg.to_dict())
 
-    print(REGISTRY)
-
-    loss_fn = get_loss(cfg.loss_fn.name, cfg.loss_fn.params)
-    metrics = {m.short_name: getattr(torchmetrics, m.name)(**m.params) for m in cfg.metrics}
-
-    recon_training_module_cls = BaseTrainer
-    ae = REGISTRY['model'].get(cfg.model.name)(**cfg.model.params)
-    training_module = recon_training_module_cls(
-        cfg, ae, loss_fn, metrics, dataset_class.NORMALIZE, dataset_class.DE_NORMALIZE
-    )
-
-    trainer.fit(
-        training_module,
-        train_dataloaders=t_dl, val_dataloaders=v_dl,
-        ckpt_path=cfg.training.ckpt_path
-    )
-
-    try:
-        if test_dl:
-            trainer.test(
-                model=training_module, dataloaders=test_dl,
-                ckpt_path=model_checkpoint_callback.best_model_path
-            )
-    except Exception as e:
-        print(e)
-
-    return ae
-
-
-def train_ode(cfg, fast_dev_run=False):
-    logger = MyWandBLogger(
-        name=cfg.run_name, project=cfg.project, log_model='all', id=cfg.run_id, allow_val_change=True
-    )
-    logger.experiment
-    model_checkpoint_callback = pl.pytorch.callbacks.ModelCheckpoint(
-        dirpath=wandb.run.dir if logger.experiment else None,
-        monitor=cfg.training.metric_to_monitor,
-        mode=cfg.training.metric_mode,
-        save_top_k=cfg.training.save_top_k,
-        save_last=cfg.training.save_last,
-        filename='model_best',
-    )
-    trainer = pl.Trainer(
-        logger=logger,
-        callbacks=[
-            model_checkpoint_callback,
-            pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),
-        ],
-        accelerator=cfg.training.accelerator,
-        precision=cfg.training.precision,
-        devices=cfg.training.devices,
-        strategy=cfg.training.strategy,
-        num_sanity_val_steps=cfg.training.num_sanity_val_steps,
-        gradient_clip_val=cfg.training.gradient_clip_val,
-        accumulate_grad_batches=cfg.training.accumulate_grad_batches,
-        benchmark=cfg.training.benchmark,
-        max_epochs=cfg.training.max_epochs,
-        fast_dev_run=fast_dev_run,
-        log_every_n_steps=1,
-    )
-
-    dataset_class = REGISTRY['dataset'].get(cfg.dataset.name)
-
+def prepare_ds_and_dls(cfg, dataset_class):
     train_ds = dataset_class(root=cfg.data_dir, **cfg.dataset.train)
     val_ds = dataset_class(root=cfg.data_dir, **cfg.dataset.val)
-
     if 'test' in cfg.dataset:
         test_ds = dataset_class(root=cfg.data_dir, **cfg.dataset.test)
     else:
@@ -156,42 +85,39 @@ def train_ode(cfg, fast_dev_run=False):
     v_sampler = torch.utils.data.WeightedRandomSampler(
         val_ds.get_sampling_weights(), 16 * cfg.batch_size, replacement=True
     )
+
     t_dl, v_dl = [
         DataLoader(
             dataset=ds, batch_size=cfg.batch_size, num_workers=num_w, shuffle=shuffle,
             pin_memory=True, persistent_workers=True, drop_last=skip_last,
             generator=torch.Generator().manual_seed(cfg.training.dataloader_seed) if shuffle else None,
-            sampler=sampler, collate_fn=ds.get_collate_fn()
+            collate_fn=dataset_class.get_collate_fn(), sampler=sampler
         )
         for ds, num_w, shuffle, skip_last, sampler in [
             (train_ds, cfg.num_workers, False, True, t_sampler), (val_ds, 1, False, False, v_sampler)
         ]
     ]
-
     test_dl = DataLoader(
         dataset=test_ds, batch_size=cfg.batch_size, num_workers=1, shuffle=False,
         pin_memory=True, persistent_workers=True, drop_last=False, collate_fn=dataset_class.get_collate_fn()
     ) if test_ds else None
+    return t_dl, v_dl, test_dl
 
-    # handle varying batch sizes and training steps
-    for _lr_n, _lr_p, _lr_i in zip(cfg.lr_scheduler.name, cfg.lr_scheduler.params, cfg.lr_scheduler.interval):
-        if _lr_n == 'get_cosine_schedule_with_warmup':
-            _lr_p['num_warmup_steps'] = int(_lr_p['num_warmup_steps'] * len(t_dl))
-            _lr_p['num_training_steps'] = int(_lr_p['num_training_steps'] * len(t_dl)) + 1
 
-    wandb.config.update(cfg.to_dict())
+def train_joint_recon_and_latent_dynamics(cfg, fast_dev_run=False):
+    model_checkpoint_callback, trainer = prepare_lightning(cfg, fast_dev_run)
+    dataset_class = REGISTRY['dataset'].get(cfg.dataset.name)
+    t_dl, v_dl, test_dl = prepare_ds_and_dls(cfg, dataset_class)
+    update_num_steps_lr_scheduler(cfg, t_dl)
 
     pprint(cfg.to_dict())
 
-    loss_fn = get_loss(cfg.loss_fn.name, cfg.loss_fn.params)
+    ae = REGISTRY['model'].get(cfg.recon_model.name)(**cfg.recon_model.params)
+    neural_ode = REGISTRY['model'].get(cfg.latent_dynamics_model.name)(**cfg.latent_dynamics_model.params)
     metrics = {m.short_name: getattr(torchmetrics, m.name)(**m.params) for m in cfg.metrics}
-
-    ode_training_module_cls = JointReconODETrainer
-    ae = REGISTRY['model'].get('HeLa-ae')()
-    neural_ode = REGISTRY['model'].get(cfg.model.name)(**cfg.model.params)
-    training_module = ode_training_module_cls(
-        cfg, neural_ode, loss_fn, metrics, dataset_class.NORMALIZE, dataset_class.DE_NORMALIZE,
-        ae.encoder, ae.decoder, n=cfg.dataset.train.n_successive + 1
+    training_module = JointReconODETrainer(
+        cfg, dataset_class.NORMALIZE, dataset_class.DE_NORMALIZE, metrics,
+        neural_ode=neural_ode, encoder=ae.encoder, decoder=ae.decoder
     )
 
     trainer.fit(
@@ -221,7 +147,7 @@ if __name__ == '__main__':
     lightning_seed = int.from_bytes(os.urandom(4), 'little')
     dataloader_seed = int.from_bytes(os.urandom(4), 'little')
 
-    for (_dataset, epochs) in [('HeLa', 200)]:
+    for (_dataset, epochs) in [('HeLa', 100)]:
         n = 3
         num_channels = 1 if _dataset in ['HeLa'] else 3
         b_s = 64 // (n + 1)
@@ -232,8 +158,8 @@ if __name__ == '__main__':
 
         _cfg = {
             'seed': lightning_seed,
-            'run_name': f'{run_name}_ode',
-            'project': 'HeLa',
+            'run_name': f'{run_name}_joint',
+            'project': f'{_dataset}',
             'run_id': None,
             'training': {
                 'metric_to_monitor': 'val/loss', 'metric_mode': 'min',
@@ -255,12 +181,13 @@ if __name__ == '__main__':
             'data_dir': os.path.join('.', 'data'),
             'batch_size': b_s,
             'num_workers': 2,
-            'model': {
+            'recon_model': {
+                'name': f'{_dataset}-ae',
+                'params': {}
+            },
+            'latent_dynamics_model': {
                 'name': f'{_dataset}-ode',
                 'params': {'dim': 512, 'timesteps': 10}
-            },
-            'loss_fn': {
-                'name': 'MSELoss', 'params': {}
             },
             'metrics': [
                 # ConfigDict({
@@ -285,5 +212,5 @@ if __name__ == '__main__':
             }
         }
         _cfg = ConfigDict(_cfg, convert_dict=True)
-        train_ode(_cfg, fast_dev_run=False)
+        train_joint_recon_and_latent_dynamics(_cfg, fast_dev_run=False)
         wandb.finish()
