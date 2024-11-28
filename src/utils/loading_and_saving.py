@@ -117,7 +117,7 @@ def load_optimizer(experiment_directory, optimizer, static_or_dynamic, checkpoin
         return 0
 
     # Load the parameters
-    data = torch.load(filename, map_location=device)
+    data = torch.load(filename, map_location=device, weights_only=True)
 
     # Put the parameters into the optimizer
     optimizer.load_state_dict(data["optimizer_state_dict"])

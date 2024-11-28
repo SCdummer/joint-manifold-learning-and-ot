@@ -1,4 +1,3 @@
-
 # Import libraries important for defining and training the model
 import torch
 import torch.nn as nn
@@ -9,11 +8,13 @@ import logging
 import argparse
 import datetime
 import os
-from tqdm import trange
+
+from tqdm.auto import tqdm
 
 # Import own created saving and loading functions
-from src.utils.loading_and_saving import (create_code_snapshot, load_experiment_specifications,
-                                          save_model_and_optimizer, load_model, load_optimizer)
+from src.utils.loading_and_saving import (
+    create_code_snapshot, load_experiment_specifications, save_model_and_optimizer, load_model, load_optimizer
+)
 
 # Load the models
 from src.models.encoders import Encoder
@@ -25,7 +26,7 @@ from src.training.wasserstein_motion_prior import FastConvolutionalW2Cost
 
 # Load the datasets and dataset related functions
 from torch.utils.data import DataLoader
-from src.data.datasets import CellData
+from src.data.datasets import HeLaCellsSuccessive
 
 # Load weights and biases for logging the training process
 import wandb
@@ -35,15 +36,16 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 # Define some loss functions
-recon_loss = nn.MSELoss() #nn.MSELoss() #nn.L1Loss() # nn.MSELoss() # nn.BCELoss()
+dataset_class = HeLaCellsSuccessive
+recon_loss = nn.MSELoss()  # nn.MSELoss() #nn.L1Loss() # nn.MSELoss() # nn.BCELoss()
 wasserstein_dist = FastConvolutionalW2Cost()
 
-def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr, joint_learning=True):
 
+def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr, joint_learning=True):
     # Define an optimizer
     if joint_learning:
         optimizer_all = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()) +
-                                     list(time_warper.parameters()), lr=init_lr)
+                                         list(time_warper.parameters()), lr=init_lr)
     else:
         optimizer_all = torch.optim.Adam(time_warper.parameters(), lr=init_lr)
 
@@ -55,7 +57,6 @@ def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr,
 
 
 def create_time_series_gif(recon_tensor, gt_tensor, save_dir, recon_idx):
-
     # Create a figure
     fig, ax = plt.subplots(1, 2)
 
@@ -71,7 +72,8 @@ def create_time_series_gif(recon_tensor, gt_tensor, save_dir, recon_idx):
 
     gif = FuncAnimation(fig, animate, fargs=(recon_tensor, gt_tensor),
                         blit=True, repeat=True, frames=gt_tensor.shape[0], interval=1)
-    gif.save(os.path.join(save_dir, "ReconstructionTimeSeries_{}.gif".format(recon_idx)), dpi=150, writer=PillowWriter(fps=5))
+    gif.save(os.path.join(save_dir, "ReconstructionTimeSeries_{}.gif".format(recon_idx)), dpi=150,
+             writer=PillowWriter(fps=5))
     ax[0].clear()
     ax[1].clear()
 
@@ -95,17 +97,15 @@ def change_model_mode(encoder, decoder, time_warper, new_mode):
         raise ValueError("Input 'new_mode' can only be 'train' or 'eval' and not {}...".format(new_mode))
 
 
-def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder, decoder, time_warper, dataloader,
-                                                  nabla_t, num_int_steps, time_subsampling, epoch, device):
-
-    # Get a batch of the training data
-    time_series_batch = next(iter(dataloader))
-
+def evaluate_random_dynamic_train_reconstructions(
+        experiment_directory, encoder, decoder, time_warper, dataloader,
+        nabla_t, num_int_steps, time_subsampling, epoch, device, p_bar, metrics_dict
+):
     # Change the mode of the models to evaluation
     change_model_mode(encoder, decoder, time_warper, 'eval')
 
     # Create a figure for each of the inputs and save it to the correct directory
-    for i, time_series in enumerate(time_series_batch):
+    for i, (time_series, _) in enumerate(dataloader):
 
         # Put the time series on cuda
         time_series = time_series.to(device)
@@ -118,7 +118,8 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
 
         # Get a latent time series
         t = torch.linspace(0, (time_series.size(0) - 1) * nabla_t, (time_series.size(0) - 1) * num_int_steps + 1).to(device)
-        z_t = time_warper(z0.reshape(1, -1), t) #.reshape((time_series.size(0) - 1) * num_int_steps + 1, -1, z0.size(1), encoder.output_size[0], encoder.output_size[1])
+        z_t = time_warper(z0.reshape(1, -1), t)
+        # .reshape((time_series.size(0) - 1) * num_int_steps + 1, -1, z0.size(1), encoder.output_size[0], encoder.output_size[1])
 
         # Get the points of reconstruction
         z_t = z_t[::num_int_steps].squeeze()
@@ -142,19 +143,22 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
         _, z_start, _ = encoder(images_start)
         end_time = nabla_t * time_subsampling
         t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling + 1).to(device)
-        z_end = time_warper(z_start.reshape(images_start.size(0), -1), t)[-1]#.reshape(time_subsampling * num_int_steps + 1, -1,
-                                                                 #z_start.size(1), encoder.output_size[0],
-                                                                 #encoder.output_size[1])[-1]
+        z_end = time_warper(z_start.reshape(images_start.size(0), -1), t)[-1]
+        # .reshape(time_subsampling * num_int_steps + 1, -1,
+        # z_start.size(1), encoder.output_size[0],
+        # encoder.output_size[1])[-1]
         images_end = time_series[time_subsampling::time_subsampling, ...]
         images_end_recon = decoder(z_end)
         images_start_recon = decoder(z_start)
 
         # Get the loss value
-        losses_start = (torch.sum((images_start - images_start_recon) ** 2, dim=(1, 2, 3)) / (images_start_recon.shape[1] * images_start_recon.shape[2] * images_start_recon.shape[3]))
-        losses_end = (torch.sum((images_end - images_end_recon) ** 2, dim=(1, 2, 3)) / (images_end_recon.shape[1] * images_end_recon.shape[2] * images_end_recon.shape[3]))
+        losses_start = (torch.sum((images_start - images_start_recon) ** 2, dim=(1, 2, 3)) / (
+                images_start_recon.shape[1] * images_start_recon.shape[2] * images_start_recon.shape[3]))
+        losses_end = (torch.sum((images_end - images_end_recon) ** 2, dim=(1, 2, 3)) / (
+                images_end_recon.shape[1] * images_end_recon.shape[2] * images_end_recon.shape[3]))
 
         # Create a figure for each of the inputs and save it to the correct directory
-        for j in range(images_end.size(0)-1):
+        for j in range(images_end.size(0) - 1):
 
             # Generate a figure
             fig, ax = plt.subplots(2, 2)
@@ -174,7 +178,9 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
             substring = "dynamic"
 
             # Create the save directory if it does not exist yet
-            save_dir = os.path.join(experiment_directory, "Figures", substring, str(epoch), 'single_time_step_recon', 'time_series_{}'.format(i))
+            save_dir = os.path.join(
+                experiment_directory, "Figures", substring, str(epoch), 'single_time_step_recon', 'time_series_{}'.format(i)
+            )
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir)
             fig.savefig(os.path.join(save_dir, "Reconstruction_t{}.png".format(j)))
@@ -187,7 +193,10 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
         recon_static = decoder(z)
 
         # Get the loss value
-        losses = (torch.sum((recon_static - time_series) ** 2, dim=(1, 2, 3)) / (recon_static.shape[1] * recon_static.shape[2] * recon_static.shape[3]))
+        losses = (
+                torch.sum((recon_static - time_series) ** 2, dim=(1, 2, 3)) / (
+                recon_static.shape[1] * recon_static.shape[2] * recon_static.shape[3])
+        )
 
         # Create a figure for each of the inputs and save it to the correct directory
         for k in range(recon_static.size(0)):
@@ -200,7 +209,8 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
             ax[1].set_title("Reconstruction (loss: {:.5f})".format(losses[k].item()))
 
             # Create the save directory if it does not exist yet
-            save_dir = os.path.join(experiment_directory, "Figures", 'dynamic', str(epoch), 'static recons', 'time_series_{}'.format(i))
+            save_dir = os.path.join(experiment_directory, "Figures", 'dynamic', str(epoch), 'static recons',
+                                    'time_series_{}'.format(i))
             if not os.path.isdir(save_dir):
                 os.makedirs(save_dir)
             fig.savefig(os.path.join(save_dir, "Reconstruction_time_series_t{}.png".format(k)))
@@ -208,13 +218,24 @@ def evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder,
             # Close the figures
             plt.close('all')
 
+        # Log the losses to weights and biases
+        metrics_dict.update({
+            'test/losses': losses.mean().item()
+        })
+        p_bar.set_postfix(metrics_dict)
+
+        if i == 4:
+            break
+
     # Change the mode of the models back to train
     change_model_mode(encoder, decoder, time_warper, 'train')
 
-def evaluate_random_static_train_reconstructions(experiment_directory, encoder, decoder, dataloader, epoch, device, num_samples=5):
 
+def evaluate_random_static_train_reconstructions(
+        experiment_directory, encoder, decoder, dataloader, epoch, device, num_samples=5
+):
     # Get a batch of the training data
-    _, _, inputs = next(iter(dataloader))
+    inputs, _ = next(iter(dataloader))
     inputs = inputs.to(device)
 
     # Get some random number of samples
@@ -252,11 +273,12 @@ def evaluate_random_static_train_reconstructions(experiment_directory, encoder, 
         # Close the figures
         plt.close('all')
 
+
 def full_time_series_collate(batch):
     return [torch.from_numpy(time_series) for time_series in batch]
 
-def plot_time_series(track_id, dataset):
 
+def plot_time_series(track_id, dataset):
     # Get the time series
     time_series = dataset.data_dict[track_id]
 
@@ -266,12 +288,17 @@ def plot_time_series(track_id, dataset):
         plt.title("(max, min) = ({}, {})".format(time_series[i].max(), time_series[i].min()))
         plt.show()
 
+
 recon_loss_no_reduc = torch.nn.MSELoss(reduction='none')
+
+
 def vae_recon_loss(img, img_recon, mu_z, log_var_z):
-    recon_loss_val = 0.5 * recon_loss_no_reduc(img.reshape(img.shape[0], -1), img_recon.reshape(img_recon.shape[0], -1)).sum(dim=-1)
+    recon_loss_val = 0.5 * recon_loss_no_reduc(img.reshape(img.shape[0], -1),
+                                               img_recon.reshape(img_recon.shape[0], -1)).sum(dim=-1)
     KLD = -0.5 * torch.sum(1 + log_var_z - mu_z.pow(2) - log_var_z.exp(), dim=-1)
     weighting_factor = 1.0 / (img.reshape(img.shape[0], -1).shape[-1])
-    return (recon_loss_val + 0.005 * KLD).mean(dim=0) * weighting_factor, recon_loss_val.mean(dim=0) * weighting_factor, KLD.mean(dim=0) * weighting_factor
+    return (recon_loss_val + 0.005 * KLD).mean(dim=0) * weighting_factor, recon_loss_val.mean(
+        dim=0) * weighting_factor, KLD.mean(dim=0) * weighting_factor
 
 
 def grad_encoder_loss(img, z):
@@ -284,7 +311,6 @@ def grad_encoder_loss(img, z):
 
 
 def train_model(experiment_directory):
-
     # First, check if the experiment directory exists. If not, indicate this to the user
     if not os.path.isdir(experiment_directory):
         raise ValueError("The experiment directory {} does not exist! "
@@ -297,7 +323,7 @@ def train_model(experiment_directory):
         device = 'cpu'
 
     # Indicate which experiment we are running
-    logging.info("Running the experiment specified in the directory: " + experiment_directory)
+    logging.info("Running the experiment specified in the directory: " + str(experiment_directory))
 
     # backup the current version of the code if there is not backup
     backup_code = True
@@ -340,7 +366,7 @@ def train_model(experiment_directory):
     # Define the models
     encoder = Encoder(latent_dim, **encoder_specs)
     decoder = Decoder(latent_dim, **decoder_specs, upsample_size=encoder.output_size)
-    #time_warper = NeuralODE(encoder.output_size[0] * encoder.output_size[1] * latent_dim, **time_warper_specs)
+    # time_warper = NeuralODE(encoder.output_size[0] * encoder.output_size[1] * latent_dim, **time_warper_specs)
     time_warper = NeuralODE(latent_dim, **time_warper_specs)
 
     # Start up a weights and biases session if we want to use weights and biases
@@ -350,7 +376,8 @@ def train_model(experiment_directory):
         os.makedirs(wandb_dir)
     else:
         if specs["UseWandb"]:
-            raise ValueError("Wandb directory already exists. Remove this directory if one wants to rerun the experiment...")
+            raise ValueError(
+                "Wandb directory already exists. Remove this directory if one wants to rerun the experiment...")
     if specs["UseWandb"]:
         wandb.init(project="WassersteinPrior-based-4dImaging", dir=os.path.join(experiment_directory), config=specs,
                    notes="The experiment directory is: {}".format(experiment_name))
@@ -359,14 +386,50 @@ def train_model(experiment_directory):
                    notes="The experiment directory is: {}".format(experiment_name), mode='disabled')
 
     # Create two datasets: a static one and a dynamic one
-    static_dataset = CellData(specs["DataSource"], time_step=time_subsampling, dynamic=False, full_time_series=False)
-    dynamic_dataset = CellData(specs["DataSource"], time_step=time_subsampling, dynamic=True, full_time_series=False)
-    dynamic_dataset_test = CellData(specs["DataSource"], time_step=1, dynamic=True, full_time_series=True)
+    root_dir = specs["DataSource"]
+    static_dataset_tr = dataset_class(
+        root_dir, split='train', seed=42, test_size=0.2,
+        subsampling=time_subsampling, n_successive=0
+    )
+    static_dataset_val = dataset_class(
+        root_dir, split='val', seed=42, test_size=0.2,
+        subsampling=time_subsampling, n_successive=0
+    )
+    dynamic_dataset_tr = dataset_class(
+        root_dir, split='train', seed=42, test_size=0.2,
+        subsampling=time_subsampling, n_successive=specs["N"] - 1
+    )
+    # dynamic_dataset_val = dataset_class(
+    #     root_dir, split='val', seed=42, test_size=0.2,
+    #     subsampling=time_subsampling, n_successive=specs["N"] - 1
+    # )
+    # n - 1 since the dataset takes into account the number of successive images from the intitial, so n gives n+1 images
+    dynamic_dataset_test = dataset_class(
+        root_dir, split='val', seed=42, test_size=0.2,
+        full_time_series=True,
+    )
 
     # Create the dataloaders
-    train_dataloader_static = DataLoader(static_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-    train_dataloader_dynamic = DataLoader(dynamic_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-    test_dataloader_dynamic = DataLoader(dynamic_dataset_test, batch_size=5, shuffle=True, drop_last=True, collate_fn=full_time_series_collate)
+    train_dataloader_static = DataLoader(
+        static_dataset_tr, batch_size=batch_size, shuffle=True, drop_last=True,
+        collate_fn=dataset_class.get_collate_fn()
+    )
+    val_dataloader_static = DataLoader(
+        static_dataset_val, batch_size=batch_size, shuffle=False, drop_last=False,
+        collate_fn=dataset_class.get_collate_fn()
+    )
+    train_dataloader_dynamic = DataLoader(
+        dynamic_dataset_tr, batch_size=batch_size, shuffle=True, drop_last=True,
+        collate_fn=dataset_class.get_collate_fn()
+    )
+    # val_dataloader_dynamic = DataLoader(
+    #     dynamic_dataset_val, batch_size=batch_size, shuffle=False, drop_last=False,
+    #     collate_fn=dataset_class.get_collate_fn()
+    # )
+    test_dataloader_dynamic = DataLoader(
+        dynamic_dataset_test, batch_size=1, shuffle=False, drop_last=False,
+        collate_fn=dataset_class.get_collate_fn(),
+    )
 
     # Get the optimizer and the scheduler
     optimizer_all, scheduler = initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr)
@@ -390,75 +453,96 @@ def train_model(experiment_directory):
     ######################################################################
 
     # For every epoch, do ...
-    for epoch in trange(start_epoch, num_epochs_static, initial=start_epoch, total=num_epochs_static, desc="Number of epochs"):
+    p_bar = tqdm(range(start_epoch, num_epochs_static), desc="Epoch", total=num_epochs_static, initial=start_epoch)
+    metrics_dict = {}
+    for epoch in p_bar:
 
         # Grab a batch
-        for _, _, batch in train_dataloader_static:
-
+        for imgs, _ in train_dataloader_static:
             # Reset the optimizer
             optimizer_all.zero_grad()
 
             # Put the batch to the correct device
-            batch = batch.to(device)
+            imgs = imgs.to(device)
 
             # Encode
-            z, _, _ = encoder(batch)
+            z, _, _ = encoder(imgs)
 
             # Decode
             recon = decoder(z)
 
             # Calculate the reconstruction loss
-            loss_recon = recon_loss(recon, batch)
+            loss_recon = recon_loss(recon, imgs)
 
             # Backpropagate and update the network parameters
             loss_recon.backward()
             optimizer_all.step()
 
             # Log the reconstruction loss to weights and biases
-            wandb.log({'recon_loss_static': loss_recon.item()})
-
-        # Print the latest reconstruction loss
-        print("loss_recon = {:.9f}".format(loss_recon.item()))
+            metrics_dict.update({'tr/recon': loss_recon.item()})
+            p_bar.set_postfix(metrics_dict)
 
         # Update the learning rate via the scheduler
-        scheduler.step()
+        scheduler.step()  # assuming the scheduler is stepped per epoch
+
+        if epoch % 5 == 0:
+            # do validation
+            val_loss = 0
+            for imgs, _ in val_dataloader_static:
+                imgs = imgs.to(device)
+                z, _, _ = encoder(imgs)
+                recon = decoder(z)
+                val_loss += recon_loss(recon, imgs).item()
+            val_loss /= len(val_dataloader_static)
+            metrics_dict.setdefault('val/recon', val_loss)
+            p_bar.set_postfix(metrics_dict)
 
         # Save the model
-        if epoch % save_freq_in_epochs == 0 or epoch == num_epochs_static-1:
-            save_model_and_optimizer(experiment_directory, 'static', epoch, encoder, decoder, time_warper,
-                                     optimizer_all, filename='latest.pth')
-            evaluate_random_static_train_reconstructions(experiment_directory, encoder, decoder, train_dataloader_static, epoch,
-                                                  device)
+        if epoch % save_freq_in_epochs == 0 or epoch == num_epochs_static - 1:
+            save_model_and_optimizer(
+                experiment_directory, 'static', epoch, encoder, decoder, time_warper, optimizer_all,
+                filename='latest.pth'
+            )
+            evaluate_random_static_train_reconstructions(
+                experiment_directory, encoder, decoder, val_dataloader_static, epoch, device
+            )
 
     ########################################
     ### Now we train everything together ###
     ########################################
 
     # We reinitialize the optimizers and schedulers
-    optimizer_all, scheduler = initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr, joint_learning)
+    optimizer_all, scheduler = initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr,
+                                                                    joint_learning)
 
     # In case we want to continue from the latest obtained model, properly initialize the weights of the neural networks
     # and of the optimizers.
     if specs["Continue"] and os.path.isdir(os.path.join(experiment_directory, "ModelParameters")):
         load_model(experiment_directory, encoder, 'encoder', 'dynamic', 'latest.pth')
         load_model(experiment_directory, decoder, 'decoder', 'dynamic', 'latest.pth')
-        load_model(experiment_directory, time_warper, 'time_warper', 'dynamic','latest.pth')
+        load_model(experiment_directory, time_warper, 'time_warper', 'dynamic', 'latest.pth')
         start_epoch = load_optimizer(experiment_directory, optimizer_all, 'dynamic', 'latest.pth', device)
     else:
         start_epoch = 0
 
     # For every epoch, do ...
-    for epoch in trange(start_epoch, num_epochs_dynamic, initial=start_epoch, total=num_epochs_dynamic, desc="Number of epochs"):
+    p_bar = tqdm(range(start_epoch, num_epochs_dynamic), desc="Epoch")
+    metrics_dict = {}
+    for epoch in p_bar:
 
         # Grab a batch
-        for track_id, img_idx_1, img_idx_2, (img_1, img_2) in train_dataloader_dynamic:
+        for imgs, _ in train_dataloader_dynamic:
 
             # Reset the optimizer
             optimizer_all.zero_grad()
 
             # Put the images to the correct device
-            img_1 = img_1.to(device)
-            img_2 = img_2.to(device)
+            imgs = imgs.to(device)
+
+            # TODO: use all frames instead of just first and last, but for consistency of how the code was written
+            # TODO: we use the first and last frame
+            batch_time_chunked = torch.chunk(imgs, specs["N"], dim=0)
+            img_1, img_2 = batch_time_chunked[0], batch_time_chunked[-1]
 
             # Encode
             z_start, mu_start, log_var_start = encoder(img_1)
@@ -467,14 +551,18 @@ def train_model(experiment_directory):
             # Latent dynamics
             end_time = nabla_t * time_subsampling
             t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling + 1).to(device)
-            #z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
+            # z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
             z_t = time_warper(z_start, t)
 
             z_dynamic_end = z_t[-1]
 
             # Loss on whether the latent codes are relative close
-            latent_regularizer = (0.1 * recon_loss(z_end, z_start) +
-                                  0.02 * 0.5 * (recon_loss(z_end, torch.zeros_like(z_end)) + recon_loss(z_start, torch.zeros_like(z_start))))
+            latent_regularizer = (
+                    0.1 * recon_loss(z_end, z_start) +
+                    0.02 * 0.5 * (
+                            recon_loss(z_end, torch.zeros_like(z_end)) + recon_loss(z_start, torch.zeros_like(z_start))
+                    )
+            )
 
             # Decode everything
             if joint_learning:
@@ -486,13 +574,15 @@ def train_model(experiment_directory):
                 if log_var_start is None or log_var_end is None:
                     loss_recon_static_1 = recon_loss(img_1, img_1_recon)
                     loss_recon_static_2 = recon_loss(img_2, img_2_recon_static)
-                    loss_recon_dynamic =  recon_loss(img_2, img_2_recon_dynamic)
+                    loss_recon_dynamic = recon_loss(img_2, img_2_recon_dynamic)
                     loss_recon_static = 0.5 * (loss_recon_static_1 + loss_recon_static_2)
                     latent_regularizer = torch.tensor(0.0).to(device)
                     loss_recon = 2.0 * loss_recon_static + 10.0 * loss_recon_dynamic
                 else:
-                    vae_loss_static_1, loss_recon_static_1, _ = vae_recon_loss(img_1, img_1_recon, mu_start, log_var_start)
-                    vae_loss_static_1, loss_recon_static_2, _ = vae_recon_loss(img_2, img_2_recon_static, mu_end, log_var_end)
+                    vae_loss_static_1, loss_recon_static_1, _ = vae_recon_loss(img_1, img_1_recon, mu_start,
+                                                                               log_var_start)
+                    vae_loss_static_1, loss_recon_static_2, _ = vae_recon_loss(img_2, img_2_recon_static, mu_end,
+                                                                               log_var_end)
                     loss_recon_dynamic = recon_loss(img_2, img_2_recon_dynamic)
                     latent_regularizer = torch.tensor(0.0).to(device)
                     loss_recon_static = 0.5 * (loss_recon_static_1 + loss_recon_static_2)
@@ -501,11 +591,15 @@ def train_model(experiment_directory):
             else:
                 loss_recon_static_1 = torch.tensor(0.0, device=device)
                 loss_recon_static_2 = torch.tensor(0.0, device=device)
-                loss_recon_dynamic =  torch.tensor(0.0, device=device)
-                loss_recon = loss_recon_static_1+ loss_recon_static_2 #+ 10 * loss_recon_dynamic
+                loss_recon_static = torch.tensor(0.0, device=device)
+                loss_recon_dynamic = torch.tensor(0.0, device=device)
+                loss_recon = loss_recon_static_1 + loss_recon_static_2  # + 10 * loss_recon_dynamic
 
             # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
-            loss_latent_recon = recon_loss(z_dynamic_end.reshape((z_dynamic_end.size(0), -1)), z_end.reshape((z_dynamic_end.size(0), -1))) # torch.sum((z_dynamic_end - z_end) ** 2) / (batch_size * latent_dim)
+            loss_latent_recon = recon_loss(
+                z_dynamic_end.reshape((z_dynamic_end.size(0), -1)),
+                z_end.reshape((z_dynamic_end.size(0), -1))
+            )  # torch.sum((z_dynamic_end - z_end) ** 2) / (batch_size * latent_dim)
 
             # TODO: Implement the OT motion loss prior
             loss_motion_prior = torch.tensor(0.0, device=device)
@@ -515,34 +609,41 @@ def train_model(experiment_directory):
             # grad_loss += 0.5 * grad_encoder_loss(img_2, z_end)
 
             # Calculate the full loss
-            loss = loss_recon + loss_latent_recon + lambda_dyn_reg * loss_motion_prior + 0.0 * latent_regularizer #+ 0.05 * grad_loss
+            loss = loss_recon + loss_latent_recon + lambda_dyn_reg * loss_motion_prior + 0.0 * latent_regularizer  # + 0.05 * grad_loss
 
             # Update the parameters
             loss.backward()
             optimizer_all.step()
 
             # Log the losses to weights and biases
-            wandb.log({'recon_loss_dynamic': loss_recon.item(), 'motion_prior_loss': loss_motion_prior.item()})
+            metrics_dict.update({
+                'tr/loss': loss.item(), 'tr/recon': loss_recon.item(),
+                'tr/latent_recon': loss_latent_recon.item(),
+                'tr/motion_prior': loss_motion_prior.item(),
+                'tr/latent_regularizer': latent_regularizer.item()}
+            )
+            p_bar.set_postfix(metrics_dict)
 
         # Update the scheduler
         scheduler.step()
 
-        # Print the loss
-        print("Loss: {:.9f}. Latent recon loss: {:.9f}. Dyn. loss: {:.9f}. Static recon. loss: {:.9f}. "
-              "Latent regularizer: {:.9f}".format(loss.item(), loss_latent_recon.item(),
-                                                  loss_recon_dynamic.item(),
-                                                  loss_recon_static.item(),
-                                                  latent_regularizer.item()))
-
         # Save the model
-        if (not epoch == 0) and (epoch % save_freq_in_epochs == 0 or epoch == num_epochs_dynamic-1):
-            save_model_and_optimizer(experiment_directory, 'dynamic', epoch, encoder, decoder, time_warper,
-                                     optimizer_all, filename='latest.pth')
-            evaluate_random_dynamic_train_reconstructions(experiment_directory, encoder, decoder, time_warper,
-                                                          test_dataloader_dynamic, nabla_t, num_int_steps, time_subsampling, epoch, device)
+        if (not epoch == 0) and (epoch % save_freq_in_epochs == 0 or epoch == num_epochs_dynamic - 1):
+            save_model_and_optimizer(
+                experiment_directory, 'dynamic', epoch, encoder, decoder, time_warper,
+                optimizer_all, filename='latest.pth'
+            )
+            evaluate_random_dynamic_train_reconstructions(
+                experiment_directory, encoder, decoder, time_warper,
+                test_dataloader_dynamic, nabla_t, num_int_steps,
+                time_subsampling, epoch, device,
+                p_bar, metrics_dict
+            )
 
 
 if __name__ == "__main__":
+    from pathlib import Path
+
     torch.random.manual_seed(31359)
     np.random.seed(31359)
 
@@ -551,10 +652,11 @@ if __name__ == "__main__":
         "--experiment",
         "-e",
         dest="experiment_directory",
-        required=True,
+        default=Path("./Experiments/Cells"),
+        # required=True,
         help="The experiment directory. This directory should include "
-        + "experiment specifications in 'specs.json', and logging will be "
-        + "done in this directory as well.",
+             + "experiment specifications in 'specs.json', and logging will be "
+             + "done in this directory as well.",
     )
 
     args = arg_parser.parse_args()
@@ -615,8 +717,6 @@ if __name__ == "__main__":
 # plt.show()
 # plt.close('all')
 #
-
-
 
 
 #
