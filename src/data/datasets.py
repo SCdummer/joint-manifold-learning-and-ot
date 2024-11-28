@@ -11,19 +11,20 @@ from torchvision.datasets import VisionDataset
 
 
 class BaseDataset(VisionDataset):
-    IMG_SIZE = (64, 64)
+    #IMG_SIZE = (64, 64)
 
     DEFAULT_TRANSFORM = T.Compose([
         T.ToTensor(),
     ])
 
-    BASE_FOLDER = 'Fluo-N2DL-HeLa'
-    TRACKS_FOLDER = '01_processed'
+    # BASE_FOLDER = 'Fluo-N2DL-HeLa'
+    # TRACKS_FOLDER = '01_processed'
 
     EXTENSION = 'tif'
 
     def __init__(self, root, split='train', seed=None, test_size=0.2, transform=None, full_time_series=False):
-        root = Path(root, self.BASE_FOLDER, self.TRACKS_FOLDER)
+        #root = Path(root, self.BASE_FOLDER, self.TRACKS_FOLDER)
+        root = Path(root)
         super(BaseDataset, self).__init__(root)
 
         # get all the tracks, these are folders in the root_dir
@@ -60,6 +61,10 @@ class BaseDataset(VisionDataset):
         self.track_weights = {
             track: 1 / len(images) for track, (images, _, _) in self.all_images_per_track.items()
         }
+
+        # Get the lowest starting time and largest end time
+        self.start_time = min([start_time for _, start_time, _ in self.all_images_per_track.values()])
+        self.end_time = max([end_time for _, _, end_time in self.all_images_per_track.values()])
 
         # we need to sample pairs of images that are n consecutive in time
         # thereofore, if n=0, it is only the image itself, n=1 is the image and the next one, etc.
@@ -116,14 +121,14 @@ class HeLaCellsSuccessive(BaseDataset):
         mult = self.subsampling
         for track_id, (track, (images, start_time, end_time)) in enumerate(self.all_images_per_track.items()):
             self.image_tracks[track_id] = []
-            for i in range(0, len(images) - n_successive, mult):
+            for i in range(0, len(images) - mult * n_successive, mult):
                 if i + mult * n_successive + 1 > len(images):
                     break
 
                 self.image_tracks[track_id].append(
                     (
                         images[i:i + mult * n_successive + 1:mult],
-                        ((start_time + i) / end_time, (start_time + i + n_successive * mult) / end_time)
+                        ((start_time - self.start_time + i) / self.end_time, (start_time - self.start_time + i + n_successive * mult) / self.end_time)
                     )
                 )
                 self.sample_weights.append(self.track_weights[track])

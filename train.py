@@ -8,7 +8,6 @@ import logging
 import argparse
 import datetime
 import os
-
 from tqdm.auto import tqdm
 
 # Import own created saving and loading functions
@@ -34,6 +33,9 @@ import wandb
 # Import code for evaluating the model
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
+
+# For rearranging tensors
+from einops import rearrange
 
 # Define some loss functions
 dataset_class = HeLaCellsSuccessive
@@ -344,16 +346,21 @@ def train_model(experiment_directory):
     # Get the hyperparameters
     num_epochs_static = specs['NumEpochsStatic']
     num_epochs_dynamic = specs['NumEpochsDynamic']
-    lambda_dyn_reg = specs['lambda_dyn_reg']
     h = specs['h']
     nabla_t = specs["Nabla_t"]
-    batch_size = specs['BatchSize']
+    batch_size_static = specs['BatchSizeStatic']
+    batch_size_dynamic = specs["BatchSizeDynamic"]
     latent_dim = specs['LatentDim']
     init_lr = specs['InitLR']
     num_int_steps = specs['NumIntSteps']
     time_subsampling = specs["TimeSubsampling"]
     joint_learning = specs["JointLearning"]
     num_reg_points = specs["NumRegPoints"]
+
+    # Get the regularization constants for the dynamic regularization
+    lambda_motion_lat = specs["LambdaDynRegLat"]
+    lambda_motion_l2 = specs["LambdaDynRegL2"]
+    lambda_motion_ot = specs["LambdaDynRegOT"]
 
     # Get the parameters regarding to saving the models and the optimizers
     save_freq_in_epochs = specs['SaveFreq']
@@ -387,12 +394,15 @@ def train_model(experiment_directory):
 
     # Create two datasets: a static one and a dynamic one
     root_dir = specs["DataSource"]
+    eval_on = specs["EvalOn"]
+    if eval_on not in ['train', 'val']:
+        raise ValueError("The option EvalOn should be 'train' or 'eval'")
     static_dataset_tr = dataset_class(
         root_dir, split='train', seed=42, test_size=0.2,
         subsampling=time_subsampling, n_successive=0
     )
     static_dataset_val = dataset_class(
-        root_dir, split='val', seed=42, test_size=0.2,
+        root_dir, split=eval_on, seed=42, test_size=0.2,
         subsampling=time_subsampling, n_successive=0
     )
     dynamic_dataset_tr = dataset_class(
@@ -405,25 +415,25 @@ def train_model(experiment_directory):
     # )
     # n - 1 since the dataset takes into account the number of successive images from the intitial, so n gives n+1 images
     dynamic_dataset_test = dataset_class(
-        root_dir, split='val', seed=42, test_size=0.2,
+        root_dir, split=eval_on, seed=42, test_size=0.2,
         full_time_series=True,
     )
 
     # Create the dataloaders
     train_dataloader_static = DataLoader(
-        static_dataset_tr, batch_size=batch_size, shuffle=True, drop_last=True,
+        static_dataset_tr, batch_size=min(len(static_dataset_tr), batch_size_static), shuffle=True, drop_last=True,
         collate_fn=dataset_class.get_collate_fn()
     )
     val_dataloader_static = DataLoader(
-        static_dataset_val, batch_size=batch_size, shuffle=False, drop_last=False,
+        static_dataset_val, batch_size=min(len(static_dataset_val), batch_size_static), shuffle=False, drop_last=False,
         collate_fn=dataset_class.get_collate_fn()
     )
     train_dataloader_dynamic = DataLoader(
-        dynamic_dataset_tr, batch_size=batch_size, shuffle=True, drop_last=True,
+        dynamic_dataset_tr, batch_size=min(len(dynamic_dataset_tr), batch_size_dynamic), shuffle=True, drop_last=True,
         collate_fn=dataset_class.get_collate_fn()
     )
     # val_dataloader_dynamic = DataLoader(
-    #     dynamic_dataset_val, batch_size=batch_size, shuffle=False, drop_last=False,
+    #     dynamic_dataset_val, batch_size=batch_size_dynamic, shuffle=False, drop_last=False,
     #     collate_fn=dataset_class.get_collate_fn()
     # )
     test_dataloader_dynamic = DataLoader(
@@ -526,7 +536,7 @@ def train_model(experiment_directory):
         start_epoch = 0
 
     # For every epoch, do ...
-    p_bar = tqdm(range(start_epoch, num_epochs_dynamic), desc="Epoch")
+    p_bar = tqdm(range(start_epoch, num_epochs_dynamic), desc="Epoch", total=num_epochs_dynamic, initial=start_epoch)
     metrics_dict = {}
     for epoch in p_bar:
 
@@ -536,80 +546,116 @@ def train_model(experiment_directory):
             # Reset the optimizer
             optimizer_all.zero_grad()
 
-            # Put the images to the correct device
+            # Put the images to the correct device and chunk the image
             imgs = imgs.to(device)
-
-            # TODO: use all frames instead of just first and last, but for consistency of how the code was written
-            # TODO: we use the first and last frame
             batch_time_chunked = torch.chunk(imgs, specs["N"], dim=0)
-            img_1, img_2 = batch_time_chunked[0], batch_time_chunked[-1]
+
+            # The initial images
+            img_start = batch_time_chunked[0]
+            img_remaining = torch.concat(batch_time_chunked[1:], dim=0)
 
             # Encode
-            z_start, mu_start, log_var_start = encoder(img_1)
-            z_end, mu_end, log_var_end = encoder(img_2)
+            z_start, mu_start, log_var_start = encoder(img_start)
+            z_remaining, mu_remaining, log_var_remaining = encoder(img_remaining)
+            z_static = torch.cat([z_start, z_remaining], dim=0)
+            mu_static = None if mu_start is None or mu_remaining is None else torch.cat([mu_start, mu_remaining], dim=0)
+            log_var_static = None if log_var_start is None or log_var_remaining is None else torch.cat([log_var_start, log_var_remaining], dim=0)
+
+            # The times at which to evaluate the ode are 0 until the time of the final datapoint in the time series
+            # that we have in the batch (note that this is not the full time series but one which contains
+            # n_consecutive images).
+            num_time_points = specs["N"]
+
+            # The time between two time points of the original time series is nabla_t. Then if we subsample only every
+            # time_subsampling points (e.g. if time_subsampling=5, we only sample the images in the time series at
+            # indices [0, 5, 10, ...]), we end up at the following end time:
+            end_time = nabla_t * time_subsampling * (num_time_points - 1)
+
+            # In case we have an explicit method, we need time steps. We assume num_int_steps to get from 0 to nabla_t.
+            if not time_warper.adaptive:
+                t_actual = torch.linspace(0.0, end_time, (num_time_points - 1) * num_int_steps * time_subsampling + 1).to(device)
+            else:
+                t_actual = torch.linspace(0.0, end_time, num_time_points).to(device)
+
+            # Add some random entries to t. Required for calculating regularizers on the time dynamics
+            t_rand = torch.rand((num_reg_points,), device=t_actual.device) * (end_time - h - 2 * 1e-6) + (h / 2 + 1e-6)
+            t_rand = torch.cat([t_rand - h / 2, t_rand + h / 2])
+            t = torch.cat([t_actual, t_rand])
+            t, indices = torch.sort(t)
 
             # Latent dynamics
-            end_time = nabla_t * time_subsampling
-            t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling + 1).to(device)
-            # z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
             z_t = time_warper(z_start, t)
 
-            z_dynamic_end = z_t[-1]
+            # One part of the latent codes is used for reconstruction while the other is used for regularization
+            z_t_for_reg = z_t[indices >= len(t_actual)]
+            z_t_for_recon = z_t[indices < len(t_actual)]
 
-            # Loss on whether the latent codes are relative close
-            latent_regularizer = (
-                    0.1 * recon_loss(z_end, z_start) +
-                    0.02 * 0.5 * (
-                            recon_loss(z_end, torch.zeros_like(z_end)) + recon_loss(z_start, torch.zeros_like(z_start))
-                    )
-            )
+            # We need to subsample in case we use a non-adaptive method
+            if not time_warper.adaptive:
+                z_t_for_recon = z_t_for_recon[::time_subsampling]
+
+            # z_static at time point i+1 - z_static at time point i
+            diff_z_static = torch.diff(torch.stack(torch.chunk(z_static, specs["N"], dim=0), dim=0), dim=0)
+
+            # Loss on whether the static latent codes are relative close and not too large
+            latent_regularizer = (0.1 * recon_loss(diff_z_static, torch.zeros_like(diff_z_static)) +
+                                  0.02 * recon_loss(z_static, torch.zeros_like(z_static)))
 
             # Decode everything
             if joint_learning:
-                img_1_recon = decoder(z_start)
-                img_2_recon_static = decoder(z_end)
-                img_2_recon_dynamic = decoder(z_dynamic_end)
+                img_recon_static = decoder(z_static)
+                img_recon_dynamic = decoder(rearrange(z_t_for_recon, "t b l -> (t b) l"))
 
                 # # Get the reconstruction loss
-                if log_var_start is None or log_var_end is None:
-                    loss_recon_static_1 = recon_loss(img_1, img_1_recon)
-                    loss_recon_static_2 = recon_loss(img_2, img_2_recon_static)
-                    loss_recon_dynamic = recon_loss(img_2, img_2_recon_dynamic)
-                    loss_recon_static = 0.5 * (loss_recon_static_1 + loss_recon_static_2)
+                if log_var_static is None:
+                    loss_recon_static = recon_loss(imgs, img_recon_static)
+                    loss_recon_dynamic = recon_loss(imgs, img_recon_dynamic)
                     latent_regularizer = torch.tensor(0.0).to(device)
                     loss_recon = 2.0 * loss_recon_static + 10.0 * loss_recon_dynamic
                 else:
-                    vae_loss_static_1, loss_recon_static_1, _ = vae_recon_loss(img_1, img_1_recon, mu_start,
-                                                                               log_var_start)
-                    vae_loss_static_1, loss_recon_static_2, _ = vae_recon_loss(img_2, img_2_recon_static, mu_end,
-                                                                               log_var_end)
-                    loss_recon_dynamic = recon_loss(img_2, img_2_recon_dynamic)
+                    vae_loss_static, loss_recon_static, _ = vae_recon_loss(imgs, img_recon_static, mu_static,
+                                                                               log_var_static)
+                    loss_recon_dynamic = recon_loss(imgs, img_recon_dynamic)
                     latent_regularizer = torch.tensor(0.0).to(device)
-                    loss_recon_static = 0.5 * (loss_recon_static_1 + loss_recon_static_2)
-                    loss_recon = vae_loss_static_1 + vae_loss_static_1 + 0.0 * loss_recon_dynamic
+                    loss_recon = vae_loss_static + 0.0 * loss_recon_dynamic
 
             else:
-                loss_recon_static_1 = torch.tensor(0.0, device=device)
-                loss_recon_static_2 = torch.tensor(0.0, device=device)
                 loss_recon_static = torch.tensor(0.0, device=device)
                 loss_recon_dynamic = torch.tensor(0.0, device=device)
-                loss_recon = loss_recon_static_1 + loss_recon_static_2  # + 10 * loss_recon_dynamic
+                loss_recon = loss_recon_static + 10 * loss_recon_dynamic
 
             # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
-            loss_latent_recon = recon_loss(
-                z_dynamic_end.reshape((z_dynamic_end.size(0), -1)),
-                z_end.reshape((z_dynamic_end.size(0), -1))
-            )  # torch.sum((z_dynamic_end - z_end) ** 2) / (batch_size * latent_dim)
+            loss_latent_recon = recon_loss(z_static, rearrange(z_t_for_recon, "t b l -> (b t) l"))
 
-            # TODO: Implement the OT motion loss prior
-            loss_motion_prior = torch.tensor(0.0, device=device)
+            # Get reconstructions used for the regularizer
+            img_recon_reg = decoder(z_t_for_reg.reshape(-1, latent_dim))
 
-            # # Use a gradient loss of the decoder
-            # grad_loss = 0.5 * grad_encoder_loss(img_1, z_start)
-            # grad_loss += 0.5 * grad_encoder_loss(img_2, z_end)
+            # Get the left hand points and the right hand points for the regularizer
+            z_t_for_recon_left = z_t_for_recon[:num_reg_points]
+            z_t_for_recon_right = z_t_for_recon[num_reg_points:]
+            img_recon_reg_left = img_recon_reg[:(num_reg_points * batch_size_dynamic), ...]
+            img_recon_reg_right = img_recon_reg[(num_reg_points * batch_size_dynamic):, ...]
+
+            # Calculate dynamic regularization
+            if lambda_motion_lat > 0:
+                latent_motion_prior = torch.mean(torch.diff(z_t_for_recon_right - z_t_for_recon_left) ** 2)
+            else:
+                latent_motion_prior = torch.tensor(0.0, device=device)
+
+            if lambda_motion_l2 > 0:
+                image_motion_prior_l2 = torch.mean((img_recon_reg_right - img_recon_reg_left) ** 2)
+            else:
+                image_motion_prior_l2 = torch.tensor(0.0, device=device)
+
+            if lambda_motion_ot > 0:
+                image_motion_prior_ot =  wasserstein_dist(img_recon_reg_right, img_recon_reg_left)
+            else:
+                image_motion_prior_ot = torch.tensor(0.0, device=device)
+
+            loss_motion_prior = lambda_motion_lat * latent_motion_prior + lambda_motion_l2 * image_motion_prior_l2 + lambda_motion_ot * image_motion_prior_ot
 
             # Calculate the full loss
-            loss = loss_recon + loss_latent_recon + lambda_dyn_reg * loss_motion_prior + 0.0 * latent_regularizer  # + 0.05 * grad_loss
+            loss = loss_recon + loss_latent_recon + 0.0 * latent_regularizer + loss_motion_prior
 
             # Update the parameters
             loss.backward()
