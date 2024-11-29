@@ -578,9 +578,12 @@ def train_model(experiment_directory):
                 t_actual = torch.linspace(0.0, end_time, num_time_points).to(device)
 
             # Add some random entries to t. Required for calculating regularizers on the time dynamics
-            t_rand = torch.rand((num_reg_points,), device=t_actual.device) * (end_time - h - 2 * 1e-6) + (h / 2 + 1e-6)
-            t_rand = torch.cat([t_rand - h / 2, t_rand + h / 2])
-            t = torch.cat([t_actual, t_rand])
+            if lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
+                t_rand = torch.rand((num_reg_points,), device=t_actual.device) * (end_time - h - 2 * 1e-6) + (h / 2 + 1e-6)
+                t_rand = torch.cat([t_rand - h / 2, t_rand + h / 2])
+                t = torch.cat([t_actual, t_rand])
+            else:
+                t = t_actual
             t, indices = torch.sort(t)
 
             # Latent dynamics
@@ -609,7 +612,7 @@ def train_model(experiment_directory):
                 # # Get the reconstruction loss
                 if log_var_static is None:
                     loss_recon_static = recon_loss(imgs, img_recon_static)
-                    loss_recon_dynamic = recon_loss(imgs, img_recon_dynamic)
+                    loss_recon_dynamic = recon_loss(imgs[batch_size_dynamic:], img_recon_dynamic[batch_size_dynamic:])
                     latent_regularizer = torch.tensor(0.0).to(device)
                     loss_recon = 2.0 * loss_recon_static + 10.0 * loss_recon_dynamic
                 else:
@@ -625,31 +628,39 @@ def train_model(experiment_directory):
                 loss_recon = loss_recon_static + 10 * loss_recon_dynamic
 
             # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
-            loss_latent_recon = recon_loss(z_static, rearrange(z_t_for_recon, "t b l -> (b t) l"))
+            loss_latent_recon = recon_loss(z_static[batch_size_dynamic:, ...], rearrange(z_t_for_recon, "t b l -> (t b) l")[batch_size_dynamic:, ...])
 
-            # Get reconstructions used for the regularizer
-            img_recon_reg = decoder(z_t_for_reg.reshape(-1, latent_dim))
+            if epoch == 500:
+                print("biem")
 
-            # Get the left hand points and the right hand points for the regularizer
-            z_t_for_recon_left = z_t_for_recon[:num_reg_points]
-            z_t_for_recon_right = z_t_for_recon[num_reg_points:]
-            img_recon_reg_left = img_recon_reg[:(num_reg_points * batch_size_dynamic), ...]
-            img_recon_reg_right = img_recon_reg[(num_reg_points * batch_size_dynamic):, ...]
+            if lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
+                # Get reconstructions used for the regularizer
+                img_recon_reg = decoder(z_t_for_reg.reshape(-1, latent_dim))
 
-            # Calculate dynamic regularization
-            if lambda_motion_lat > 0:
-                latent_motion_prior = torch.mean(torch.diff(z_t_for_recon_right - z_t_for_recon_left) ** 2)
+                # Get the left hand points and the right hand points for the regularizer
+                z_t_for_recon_left = z_t_for_recon[:num_reg_points]
+                z_t_for_recon_right = z_t_for_recon[num_reg_points:]
+                img_recon_reg_left = img_recon_reg[:(num_reg_points * batch_size_dynamic), ...]
+                img_recon_reg_right = img_recon_reg[(num_reg_points * batch_size_dynamic):, ...]
+
+                # Calculate dynamic regularization
+                if lambda_motion_lat > 0:
+                    latent_motion_prior = torch.mean(torch.diff(z_t_for_recon_right - z_t_for_recon_left) ** 2)
+                else:
+                    latent_motion_prior = torch.tensor(0.0, device=device)
+
+                if lambda_motion_l2 > 0:
+                    image_motion_prior_l2 = torch.mean((img_recon_reg_right - img_recon_reg_left) ** 2)
+                else:
+                    image_motion_prior_l2 = torch.tensor(0.0, device=device)
+
+                if lambda_motion_ot > 0:
+                    image_motion_prior_ot =  wasserstein_dist(img_recon_reg_right, img_recon_reg_left)
+                else:
+                    image_motion_prior_ot = torch.tensor(0.0, device=device)
             else:
                 latent_motion_prior = torch.tensor(0.0, device=device)
-
-            if lambda_motion_l2 > 0:
-                image_motion_prior_l2 = torch.mean((img_recon_reg_right - img_recon_reg_left) ** 2)
-            else:
                 image_motion_prior_l2 = torch.tensor(0.0, device=device)
-
-            if lambda_motion_ot > 0:
-                image_motion_prior_ot =  wasserstein_dist(img_recon_reg_right, img_recon_reg_left)
-            else:
                 image_motion_prior_ot = torch.tensor(0.0, device=device)
 
             loss_motion_prior = lambda_motion_lat * latent_motion_prior + lambda_motion_l2 * image_motion_prior_l2 + lambda_motion_ot * image_motion_prior_ot
@@ -663,7 +674,10 @@ def train_model(experiment_directory):
 
             # Log the losses to weights and biases
             metrics_dict.update({
-                'tr/loss': loss.item(), 'tr/recon': loss_recon.item(),
+                'tr/loss': loss.item(),
+                'tr/recon': loss_recon.item(),
+                'tr/recon_static': loss_recon_static.item(),
+                'tr/recon_dynamic': loss_recon_dynamic.item(),
                 'tr/latent_recon': loss_latent_recon.item(),
                 'tr/motion_prior': loss_motion_prior.item(),
                 'tr/latent_regularizer': latent_regularizer.item()}
@@ -727,42 +741,52 @@ if __name__ == "__main__":
 #     plt.imshow(recon_list[-1])
 #     plt.show()
 #
-# # Plotting the latent space
-# fig, ax = plt.subplots()
-# latent_dataloader = DataLoader(CellData(specs["DataSource"], time_step=5, dynamic=True, full_time_series=True), batch_size=1)
-# cmap = plt.cm.get_cmap('hsv', len(latent_dataloader))
-# for i, time_series in enumerate(latent_dataloader):
-#
-#     if i % 1 == 0:
-#         batch = time_series.squeeze().unsqueeze(1)
-#         _, z_thing, _ = encoder(batch.to('cuda'))
-#
-#         end_time = nabla_t * time_subsampling * (z_thing.size(0) - 1)
-#         t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling * (z_thing.size(0) - 1) + 1).to(device)
-#         # z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
-#         z_t_thing = time_warper(z_thing[0, ...][None, ...], t)
-#         #print(z_t_thing.shape)
-#         z_t_thing = torch.cat([z_t_thing[0, ...][None,...], z_t_thing[time_subsampling::time_subsampling]],dim=0)
-#         #print(z_t_thing.shape)
-#         #print("YEEEEEE")
-#         one_step_pred = time_warper(z_thing, torch.linspace(0.0, nabla_t * time_subsampling, num_int_steps * time_subsampling + 1).to(device))
-#         #print(one_step_pred.size())
-#         #print(z_thing.size())
-#         #print("t")
-#         one_step_pred = torch.cat([z_thing[0, ...][None, ...], one_step_pred[-1, ...][:-1, ...]], dim=0)
-#         #print("t")
-#         z_thing = z_thing.detach().cpu().numpy()
-#         z_t_thing = z_t_thing.detach().cpu().numpy().squeeze()
-#         one_step_pred = one_step_pred.detach().cpu().numpy().squeeze()
-#         #print("t")
-#         ax.scatter(z_thing[:, 0], z_thing[:, 1], s=60, c=cmap(i))#c='b')#cmap(i))
-#         #ax.scatter(z_t_thing[:, 0], z_t_thing[:, 1], s=5, c='black', marker='*')#)cmap(i), marker="x")
-#         #print(one_step_pred.shape)
-#         ax.scatter(one_step_pred[:, 0], one_step_pred[:, 1], s=5, c='black', marker='x')#c='g')#cmap(len(latent_dataloader)-i-1), marker="*")
-#
-# plt.show()
-# plt.close('all')
-#
+# Plotting the latent space
+fig, ax = plt.subplots()
+latent_dataset = dataset_class(
+        root_dir, split=eval_on, seed=42, test_size=0.2, subsampling=time_subsampling,
+        full_time_series=True
+    )
+latent_dataloader = DataLoader(latent_dataset, batch_size=1)
+
+cmap = plt.cm.get_cmap('hsv', len(latent_dataloader))
+for i, (time_series, _) in enumerate(latent_dataloader):
+    if i % 1 == 0:
+        time_series = torch.stack(time_series)
+        print(time_series.size())
+        batch = time_series.squeeze().unsqueeze(1)
+        _, z_thing, _ = encoder(batch.to('cuda'))
+        print(z_thing.size())
+
+        end_time = nabla_t * time_subsampling * (z_thing.size(0) - 1)
+
+        print(end_time)
+
+        t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling * (z_thing.size(0) - 1) + 1).to(device)
+        # z_t = time_warper(z_start.reshape(batch_size, -1), t).reshape(time_subsampling * num_int_steps + 1, -1, latent_dim, encoder.output_size[0], encoder.output_size[1])
+        z_t_thing = time_warper(z_thing[0, ...][None, ...], t)
+        #print(z_t_thing.shape)
+        z_t_thing = torch.cat([z_t_thing[0, ...][None,...], z_t_thing[time_subsampling::time_subsampling]],dim=0)
+        #print(z_t_thing.shape)
+        #print("YEEEEEE")
+        one_step_pred = time_warper(z_thing, torch.linspace(0.0, nabla_t * time_subsampling, num_int_steps * time_subsampling + 1).to(device))
+        #print(one_step_pred.size())
+        #print(z_thing.size())
+        #print("t")
+        one_step_pred = torch.cat([z_thing[0, ...][None, ...], one_step_pred[-1, ...][:-1, ...]], dim=0)
+        #print("t")
+        z_thing = z_thing.detach().cpu().numpy()
+        z_t_thing = z_t_thing.detach().cpu().numpy().squeeze()
+        one_step_pred = one_step_pred.detach().cpu().numpy().squeeze()
+        #print("t")
+        ax.scatter(z_thing[:, 0], z_thing[:, 1], s=60, c=cmap(i))#c='b')#cmap(i))
+        ax.scatter(z_t_thing[:, 0], z_t_thing[:, 1], s=5, c='black', marker='*')#)cmap(i), marker="x")
+        #print(one_step_pred.shape)
+        #ax.scatter(one_step_pred[:, 0], one_step_pred[:, 1], s=5, c='black', marker='x')#c='g')#cmap(len(latent_dataloader)-i-1), marker="*")
+
+plt.show()
+plt.close('all')
+
 
 
 #

@@ -165,6 +165,7 @@ class HeLaCellsSuccessive(BaseDataset):
     def __getitem__(self, idx):
         if self.full_time_series:
             xs, start_time, end_time = self.all_images_per_track[list(self.all_images_per_track.keys())[idx]]
+            xs = xs[::self.subsampling]
             t = torch.linspace(start_time / end_time, 1, steps=len(xs), dtype=torch.float32)
         else:
             xs, times = self.flat_image_tracks[idx]
