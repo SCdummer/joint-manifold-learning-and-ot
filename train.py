@@ -357,6 +357,9 @@ def train_model(experiment_directory):
     joint_learning = specs["JointLearning"]
     num_reg_points = specs["NumRegPoints"]
 
+    # Get the weighting factor for the dynamic reconstruction loss
+    lambda_recon_dynamic = specs["LambdaReconDynamic"]
+
     # Get the regularization constants for the dynamic regularization
     lambda_motion_lat = specs["LambdaDynRegLat"]
     lambda_motion_l2 = specs["LambdaDynRegL2"]
@@ -617,19 +620,19 @@ def train_model(experiment_directory):
                     loss_recon_static = recon_loss(imgs, img_recon_static)
                     loss_recon_dynamic = recon_loss(imgs[batch_size_dynamic:], img_recon_dynamic[batch_size_dynamic:])
                     latent_regularizer = torch.tensor(0.0).to(device)
-                    loss_recon = 2.0 * loss_recon_static + 10.0 * loss_recon_dynamic
+                    loss_recon = loss_recon_static + lambda_recon_dynamic * loss_recon_dynamic
                 else:
                     vae_loss_static, loss_recon_static, _ = vae_recon_loss(imgs, img_recon_static, mu_static,
                                                                                log_var_static)
                     loss_recon_dynamic = recon_loss(imgs, img_recon_dynamic)
                     latent_regularizer = torch.tensor(0.0).to(device)
-                    loss_recon = vae_loss_static + 0.0 * loss_recon_dynamic
+                    loss_recon = vae_loss_static + lambda_recon_dynamic * loss_recon_dynamic
 
             else:
                 img_recon_dynamic = decoder(rearrange(z_t_for_recon, "t b l -> (t b) l"))
                 loss_recon_static = torch.tensor(0.0, device=device)
                 loss_recon_dynamic = recon_loss(imgs[batch_size_dynamic:], img_recon_dynamic[batch_size_dynamic:])
-                loss_recon = loss_recon_static + 10 * loss_recon_dynamic
+                loss_recon = loss_recon_static + lambda_recon_dynamic * loss_recon_dynamic
 
             # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
             loss_latent_recon = recon_loss(z_static[batch_size_dynamic:, ...], rearrange(z_t_for_recon, "t b l -> (t b) l")[batch_size_dynamic:, ...])
