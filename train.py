@@ -507,6 +507,9 @@ def train_model(experiment_directory):
             metrics_dict.update({'val/recon': val_loss})
             p_bar.set_postfix(metrics_dict)
 
+        # Log the training loss
+        wandb.log({"loss_recon_static": loss_recon.item()})
+
         # Save the model
         if epoch % save_freq_in_epochs == 0 or epoch == num_epochs_static - 1:
             save_model_and_optimizer(
@@ -684,6 +687,16 @@ def train_model(experiment_directory):
 
         # Update the scheduler
         scheduler.step()
+
+        # Log to weights and biases
+        wandb.log({
+                'tr/loss': loss.item(),
+                'tr/recon': loss_recon.item(),
+                'tr/recon_static': loss_recon_static.item(),
+                'tr/recon_dynamic': loss_recon_dynamic.item(),
+                'tr/latent_recon': loss_latent_recon.item(),
+                'tr/motion_prior': loss_motion_prior.item(),
+                'tr/latent_regularizer': latent_regularizer.item()})
 
         # Save the model
         if (not epoch == 0) and (epoch % save_freq_in_epochs == 0 or epoch == num_epochs_dynamic - 1):
