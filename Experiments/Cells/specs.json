@@ -1,9 +1,9 @@
 {
-  "DataSource" : "data",
+  "DataSource" : "data/Fluo-N2DL-HeLa/01_processed",
   "EncoderSpecs" : {
     "num_filters": [512, 256, 128, 64],
-    "img_dims": [1, 64, 64],
-    "use_vae": true
+    "img_dims": [1, 64, 80],
+    "use_vae": false
   },
   "DecoderSpecs" : {
     "num_filters": [64, 128, 256, 512]
@@ -14,20 +14,24 @@
     "act": "swish",
     "adjoint_method": false
   },
+  "EvalOn": "train",
   "TimeSubsampling": 5,
-  "N": 8,
   "NumIntSteps": 1,
-  "Nabla_t": 0.5,
-  "NumEpochsStatic": 2,
-  "NumEpochsDynamic": 2,
+  "N": 5,
+  "Nabla_t": 0.1,
+  "NumEpochsStatic": 500,
+  "NumEpochsDynamic": 500,
   "JointLearning": true,
-  "BatchSize": 64,
+  "BatchSizeStatic": 64,
+  "BatchSizeDynamic": 6,
   "LatentDim": 100,
   "InitLR": 5e-4,
-  "SaveFreq": 1,
+  "SaveFreq": 500,
   "UseWandb": false,
   "Continue": true,
-  "h": 0.01,
+  "h": 0.1,
   "NumRegPoints": 2,
-  "lambda_dyn_reg": 10
+  "LambdaDynRegLat": 0.0,
+  "LambdaDynRegL2": 0.0,
+  "LambdaDynRegOT": 0.0
 }
