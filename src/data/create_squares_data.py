@@ -6,6 +6,7 @@ from matplotlib.animation import FuncAnimation, PillowWriter
 import matplotlib.pyplot as plt
 from PIL import Image
 
+
 def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), use_smooth_function=True):
     r"""Creates an image of a square on a 2D plane.
 
@@ -35,7 +36,7 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), u
     # Get a meshgrid
     _x, _y = torch.meshgrid(torch.arange(resolution[0]), torch.arange(resolution[1]))
     xy_centered = torch.stack([_x[None, ...] - center_x[:, None, None], _y[None, ...] - center_y[:, None, None]], dim=1)
-    
+
     # Apply the inverse rotation matrix to the points
     rotMatrix = torch.zeros(theta.shape[0], 2, 2)
     rotMatrix[:, 0, 0] = torch.cos(theta)
@@ -45,10 +46,10 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), u
     xy_rotated = torch.einsum('bij,bjgf->bigf', rotMatrix, xy_centered)
 
     # Check where the distance is smaller than the side length. Those points should get a 1
-    mask_x_coord = torch.logical_and((xy_rotated[:, 0, ...] - side_length[:, None, None] / 2)<=0,
-                             (xy_rotated[:, 0, ...] + side_length[:, None, None] / 2)>=0)
-    mask_y_coord = torch.logical_and((xy_rotated[:, 1, ...] - side_length[:, None, None] / 2)<=0,
-                             (xy_rotated[:, 1, ...] + side_length[:, None, None] / 2)>=0)
+    mask_x_coord = torch.logical_and((xy_rotated[:, 0, ...] - side_length[:, None, None] / 2) <= 0,
+                                     (xy_rotated[:, 0, ...] + side_length[:, None, None] / 2) >= 0)
+    mask_y_coord = torch.logical_and((xy_rotated[:, 1, ...] - side_length[:, None, None] / 2) <= 0,
+                                     (xy_rotated[:, 1, ...] + side_length[:, None, None] / 2) >= 0)
     mask = torch.logical_and(mask_x_coord, mask_y_coord)
 
     # Create a nice profile for the image
@@ -59,7 +60,7 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), u
         scaling = side_length[:, None, None] / 2
         molifier_profile = torch.where(xy_squared_max_norm - side_length[:, None, None] / 2 < 0,
                                        torch.exp(-1.0 / (1 - xy_squared_max_norm / (scaling)) + 1),
-                                                 0.0 * torch.ones_like(xy_squared_max_norm))
+                                       0.0 * torch.ones_like(xy_squared_max_norm))
     else:
         molifier_profile = torch.ones_like(mask)
 
@@ -68,6 +69,59 @@ def create_square(center_x, center_y, side_length, theta, resolution=(28, 28), u
 
     # Return the square
     return square_arr
+
+
+def create_gaussian(center_x, center_y, side_length, theta, resolution=(28, 28), use_smooth_function=True):
+    r"""Creates an image of a gaussian on a 2D plane.
+
+    Args:
+        center_x (torch tensor of size (N,)): the x-coordinate of the center of the gaussian.
+
+        center_y (torch tensor of size (N,)): the y-coordinate of the center of the gaussian.
+
+        side_length (torch tensor of size (N,)): the spread of the gaussian.
+
+        theta (torch tensor of size (N,)): the rotation angle for the gaussian.
+
+        resolution (tuple of ints): the resolution of the resulting image. The values of center_x, center_y, and
+                                    side_length should all be within [0, resolution[0]], [0, resolution[1]], and
+                                    [0, min(resolution[0], resolution[1])] respectively.
+
+        use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
+                                    boundary or whether to have an indicator function representing the square.
+
+    Returns:
+        a torch tensor of size (N, resolution[0], resolution[1]) representing images of gaussians.
+    """
+
+    # Get a meshgrid
+    _x, _y = torch.meshgrid(torch.arange(resolution[0]), torch.arange(resolution[1]))
+
+    # Apply the inverse rotation matrix to the points
+    xy_centered = torch.stack([_x[None, ...] - center_x[:, None, None], _y[None, ...] - center_y[:, None, None]], dim=1)
+
+    # Apply the inverse rotation matrix to the points
+    rotMatrix = torch.zeros(theta.shape[0], 2, 2)
+    rotMatrix[:, 0, 0] = torch.cos(theta)
+    rotMatrix[:, 0, 1] = -torch.sin(theta)
+    rotMatrix[:, 1, 0] = torch.sin(theta)
+    rotMatrix[:, 1, 1] = torch.cos(theta)
+    xy_rotated = torch.einsum('bij,bjgf->bigf', rotMatrix, xy_centered)
+
+    # Get the gaussian
+    gaussian_arr = torch.exp(-((xy_rotated[:, 0, ...] / side_length[:, None, None]) ** 2 + (
+                xy_rotated[:, 1, ...] / side_length[:, None, None]) ** 2))
+
+    # truncate the gaussian to be zero outside the side_length in a circle
+    mask = (xy_rotated[:, 0, ...] ** 2 + xy_rotated[:, 1, ...] ** 2) <= side_length[:, None, None] ** 2
+    gaussian_arr = gaussian_arr * mask
+    min_inside_gaussian = gaussian_arr[mask].min()
+    max_inside_gaussian = gaussian_arr[mask].max()
+    gaussian_arr = (gaussian_arr - min_inside_gaussian) / (max_inside_gaussian - min_inside_gaussian)
+    gaussian_arr[gaussian_arr < 0] = 0
+
+    # Return the gaussian
+    return gaussian_arr
 
 
 class SquareTimeSeries:
@@ -88,7 +142,9 @@ class SquareTimeSeries:
                             boundary or whether to have an indicator function representing the square.
 
     """
-    def __init__(self, use_forcing=True, shift=2, force_field_magnitude=2.0, resolution=(28, 28), use_smooth_function=True):
+
+    def __init__(self, use_forcing=True, shift=2, force_field_magnitude=2.0, resolution=(28, 28),
+                 use_smooth_function=True):
         self.use_forcing = use_forcing
         self.shift = shift
         if use_forcing:
@@ -127,9 +183,9 @@ class SquareTimeSeries:
         y_index = torch.arange(0, resolution_y)[:, None].repeat((1, resolution_x))
 
         # Get the maximum and minimum values
-        min_x = (mask * x_index[None, ...] + (1.0 - mask.int())*10000).min(dim=1).values.min(dim=1).values
+        min_x = (mask * x_index[None, ...] + (1.0 - mask.int()) * 10000).min(dim=1).values.min(dim=1).values
         max_x = (mask * x_index[None, ...]).max(dim=1).values.max(dim=1).values
-        min_y = (mask * y_index[None, ...] + (1.0 - mask.int())*10000).min(dim=1).values.min(dim=1).values
+        min_y = (mask * y_index[None, ...] + (1.0 - mask.int()) * 10000).min(dim=1).values.min(dim=1).values
         max_y = (mask * y_index[None, ...]).max(dim=1).values.max(dim=1).values
 
         # Return these values
@@ -173,14 +229,16 @@ class SquareTimeSeries:
         center_x, center_y, side_length, theta = z[:, 0], z[:, 1], z[:, 2], z[:, 3]
 
         # Get the current square
-        square = create_square(center_x, center_y, side_length, theta, self.resolution, self.use_smooth_function)
+        square = create_gaussian(center_x, center_y, side_length, theta, self.resolution, self.use_smooth_function)
 
         # Get the largest points
         min_x, max_x, min_y, max_y = self.calculate_largest_point(square)
 
         # Get the derivative with respect to the center
-        weighting_x = torch.maximum(torch.sigmoid(-(self.resolution_x - max_x - self.shift)) ** 2, torch.sigmoid(-(min_x - self.shift)) ** 2)
-        weighting_y = torch.maximum(torch.sigmoid(-(self.resolution_y - max_y - self.shift)) ** 2, torch.sigmoid(-(min_y - self.shift)) ** 2)
+        weighting_x = torch.maximum(torch.sigmoid(-(self.resolution_x - max_x - self.shift)) ** 2,
+                                    torch.sigmoid(-(min_x - self.shift)) ** 2)
+        weighting_y = torch.maximum(torch.sigmoid(-(self.resolution_y - max_y - self.shift)) ** 2,
+                                    torch.sigmoid(-(min_y - self.shift)) ** 2)
         weighting = torch.maximum(weighting_x, weighting_y)
 
         # Get the full derivative
@@ -192,7 +250,7 @@ class SquareTimeSeries:
         dzdt = dzdt_safe_region * (1.0 - weighting_tensor) + weighting_tensor * self.force_field_magnitude
 
         # Return the derivative
-        return dzdt.permute((1,0))
+        return dzdt.permute((1, 0))
 
     def calculate_image_path(self, center0_x, center0_y, side_length0, theta0, num_time_points, nabla_t):
         r"""Given an initial square, calculate a time series path using the defined ODE.
@@ -224,7 +282,7 @@ class SquareTimeSeries:
         # Get the things over time
         y0 = torch.from_numpy(np.stack([center0_x, center0_y, side_length0, theta0], axis=-1)).float()
         t = torch.from_numpy(t).float()
-        z_t = torchdiffeq.odeint(self.vec_field,y0=y0, t=t, method='dopri5', atol=5e-4, rtol=1e-4)
+        z_t = torchdiffeq.odeint(self.vec_field, y0=y0, t=t, method='dopri5', atol=5e-4, rtol=1e-4)
 
         # Get the squares belonging to each of the options
         centert_x, centert_y, side_lengtht, thetat = z_t[..., 0], z_t[..., 1], z_t[..., 2], z_t[..., 3]
@@ -232,10 +290,13 @@ class SquareTimeSeries:
         centert_y = centert_y.reshape(-1)
         side_lengtht = side_lengtht.reshape(-1)
         thetat = thetat.reshape(-1)
-        squares = create_square(centert_x, centert_y, side_lengtht, thetat, self.resolution, self.use_smooth_function).reshape(z_t.size(0), z_t.size(1), self.resolution_x, self.resolution_y)
+        squares = create_gaussian(centert_x, centert_y, side_lengtht, thetat, self.resolution,
+                                  self.use_smooth_function).reshape(z_t.size(0), z_t.size(1), self.resolution_x,
+                                                                    self.resolution_y)
 
         # Return the squares and the latent vectors generating the squares
         return z_t, squares
+
 
 class SquareTimeSeriesRandom(SquareTimeSeries):
     r"""A subclass of the SquareTimeSeries class that generates time series of squares. These time series are forced
@@ -256,10 +317,11 @@ class SquareTimeSeriesRandom(SquareTimeSeries):
         use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
                             boundary or whether to have an indicator function representing the square.
     """
+
     def __init__(self, shift=2, force_field_magnitude=2.0, resolution=(28, 28), use_smooth_function=True):
         super().__init__(use_forcing=True, shift=shift, force_field_magnitude=force_field_magnitude,
                          resolution=resolution, use_smooth_function=use_smooth_function)
-        self.dyn_mat = torch.randn(4,4)
+        self.dyn_mat = torch.randn(4, 4)
 
     def calc_dzdt_in_safe_region(self, center_x, center_y, side_length, theta):
         dzdt_safe_region = self.dyn_mat @ torch.stack([center_x, center_y, side_length, theta], dim=0)
@@ -313,6 +375,7 @@ class SquareTimeSeriesDesiredDestination(SquareTimeSeries):
         use_smooth_function (bool): whether to create a smooth square with values slowly decaying towards zero at the
                                     boundary or whether to have an indicator function representing the square.
     """
+
     def __init__(self, use_forcing, shift=2, force_field_magnitude=2.0, resolution=(28, 28),
                  desired_center_x=None, desired_center_y=None, desired_side_length=None,
                  speed_constant_x=0.02, speed_constant_y=0.02, speed_constant_side_length=0.02,
@@ -341,15 +404,20 @@ class SquareTimeSeriesDesiredDestination(SquareTimeSeries):
 
         # Get the full derivative
         weighting_curr_center = (1.0 + self.amplifier * torch.exp(
-            -((center_x - self.resolution_x / 2) ** 2 / (self.sigma_x ** 2) + (center_y - self.resolution_y / 2) ** 2 / (self.sigma_y ** 2))))
+            -((center_x - self.resolution_x / 2) ** 2 / (self.sigma_x ** 2) + (
+                        center_y - self.resolution_y / 2) ** 2 / (self.sigma_y ** 2))))
 
-        dcenter_xdt = -self.grad_potential(center_x - self.desired_center_x) * self.speed_constant_x * weighting_curr_center
-        dcenter_ydt = -self.grad_potential(center_y - self.desired_center_y) * self.speed_constant_y * weighting_curr_center
-        dside_lengthdt = -self.grad_potential(side_length - self.desired_side_length) * self.speed_constant_side_length * weighting_curr_center
+        dcenter_xdt = -self.grad_potential(
+            center_x - self.desired_center_x) * self.speed_constant_x * weighting_curr_center
+        dcenter_ydt = -self.grad_potential(
+            center_y - self.desired_center_y) * self.speed_constant_y * weighting_curr_center
+        dside_lengthdt = -self.grad_potential(
+            side_length - self.desired_side_length) * self.speed_constant_side_length * weighting_curr_center
         dthetadt = torch.zeros_like(dcenter_xdt)
         dzdt_safe_region = torch.stack([dcenter_xdt, dcenter_ydt, dside_lengthdt, dthetadt], dim=0)
 
         return dzdt_safe_region
+
 
 def create_time_series_gif(image_array, save_dir, time_series_id):
     r"""Saving a gif of the image time series.
@@ -393,7 +461,7 @@ def save_squares_latents_and_gifs(name_squares_dataset: str, squares: np.ndarray
     """
 
     # Get the directory where we save the square images as .tif file
-    save_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "Squares_" + name_squares_dataset)
+    save_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "Circle_" + name_squares_dataset)
 
     # Create some directories if they do not exist
     if not os.path.isdir(os.path.join(save_dir, "latents")):
@@ -422,8 +490,8 @@ def save_squares_latents_and_gifs(name_squares_dataset: str, squares: np.ndarray
         # Finally, save some gifs of the time series
         create_time_series_gif(squares[:, i, ...], os.path.join(save_dir, "gifs"), i)
 
-if __name__ == '__main__':
 
+if __name__ == '__main__':
     ###########################################################################
     ### Now defining a time series where rectangles move from left to right ###
     ###########################################################################
@@ -452,7 +520,7 @@ if __name__ == '__main__':
     sigma_y = min(resolution_y, resolution_x) / 8
     amplifier = 20.0 * min(resolution_x, resolution_y) / 128
     use_smooth_function = False
-    name_squares_dataset = "horizontally_moving_big_dataset_indicator_small"
+    name_squares_dataset = "gaussian_moving_horizontally"
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)
@@ -481,11 +549,11 @@ if __name__ == '__main__':
     theta0 = 0.0 * (2 * np.random.rand(num_time_series) - 1)
 
     # Generate random square time series
-    z_t, squares = time_series_creator_destination.calculate_image_path(center0_x, center0_y, side_length0, theta0, num_time_points, nabla_t)
+    z_t, squares = time_series_creator_destination.calculate_image_path(center0_x, center0_y, side_length0, theta0,
+                                                                        num_time_points, nabla_t)
 
     # Save the squares and gifs
     save_squares_latents_and_gifs(name_squares_dataset, squares.numpy(), z_t.numpy())
-
 
     #
     # # Get the object that can be used to create time series
