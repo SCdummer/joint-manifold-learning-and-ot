@@ -109,6 +109,7 @@ def create_gaussian(center_x, center_y, side_length, theta, resolution=(28, 28),
     xy_rotated = torch.einsum('bij,bjgf->bigf', rotMatrix, xy_centered)
 
     # Get the gaussian
+    side_length = torch.where(side_length / 2 < 1, 1, side_length / 2)
     gaussian_arr = torch.exp(-((xy_rotated[:, 0, ...] / side_length[:, None, None]) ** 2 + (
                 xy_rotated[:, 1, ...] / side_length[:, None, None]) ** 2))
 
@@ -520,7 +521,7 @@ if __name__ == '__main__':
     sigma_y = min(resolution_y, resolution_x) / 8
     amplifier = 20.0 * min(resolution_x, resolution_y) / 128
     use_smooth_function = False
-    name_squares_dataset = "gaussian_moving_horizontally"
+    name_squares_dataset = "small_gaussian_large"
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)
