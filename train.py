@@ -357,6 +357,7 @@ def train_model(experiment_directory):
     time_subsampling = specs["TimeSubsampling"]
     joint_learning = specs["JointLearning"]
     num_reg_points = specs["NumRegPoints"]
+    detach_barycenter = specs["DetachBarycenter"]
 
     # Get the weighting factor for the dynamic reconstruction loss
     lambda_recon_dynamic = specs["LambdaReconDynamic"]
@@ -365,6 +366,7 @@ def train_model(experiment_directory):
     lambda_motion_lat = specs["LambdaDynRegLat"]
     lambda_motion_l2 = specs["LambdaDynRegL2"]
     lambda_motion_ot = specs["LambdaDynRegOT"]
+    lambda_wass_loss = specs["LambdaWassLoss"]
 
     # Get the parameters regarding to saving the models and the optimizers
     save_freq_in_epochs = specs['SaveFreq']
@@ -671,17 +673,16 @@ def train_model(experiment_directory):
             loss_latent_recon = recon_loss(zs_static[batch_size_dynamic:, ...], stack_rearrange(zt_pred)[batch_size_dynamic:, ...])
 
             if lambda_motion_ot > 0 and specs["OT_regularizer_type"] == "barycenter":
+                img_recon_reg = decoder(stack_rearrange(zt_regs))
                 # Then for each of the random numbers, we look at the interval it belongs to
                 intval_idx = torch.floor(t_rand / (nabla_t * time_subsampling)).int()
 
                 # Get the points where we have data and that correspond to the regularization ones
-                barycenter_boundaries = rearrange(img_recon_dynamic, "(t b) c h w -> t b c h w ", t=num_time_points)
-                bary_center_boundaries_normalization_factor = torch.sum(barycenter_boundaries, dim=(2, 3, 4),
-                                                                        keepdim=True)
+                barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
+                bary_center_boundaries_normalization_factor = torch.sum(barycenter_boundaries, dim=(2, 3, 4), keepdim=True)
                 barycenter_boundaries = barycenter_boundaries / bary_center_boundaries_normalization_factor
-                barycenter_boundary_left, barycenter_boundary_right = barycenter_boundaries[intval_idx, ...], \
-                barycenter_boundaries[intval_idx + 1, ...]
-
+                barycenter_boundary_left, barycenter_boundary_right = barycenter_boundaries[intval_idx], \
+                barycenter_boundaries[intval_idx + 1]
                 # Get pairs of weights depending on the sampled random time points
                 img_pairs = torch.stack([barycenter_boundary_left, barycenter_boundary_right], dim=0)
                 weights_left = 1.0 - torch.remainder(t_rand, (nabla_t * time_subsampling)) / (
@@ -693,8 +694,7 @@ def train_model(experiment_directory):
                 weights = rearrange(weights, 'm t b c h w -> m (t b) c h w')
 
                 # Calculate the barycenters
-                barycenters = convolutional_barycenter_calculation(img_pairs, weights=weights, scaling=0.95,
-                                                                   need_diffable=True)
+                barycenters = convolutional_barycenter_calculation(img_pairs, weights=weights, scaling=0.95, need_diffable=True)
                 if detach_barycenter:
                     barycenters = barycenters.detach()
 
@@ -717,6 +717,7 @@ def train_model(experiment_directory):
                 barycenter_loss = recon_loss(img_recon_reg_scaled, barycenters)
                 # recon_left_bounds = rearrange(img_recon_dynamic, '(t b) c h w -> t b c h w', t=num_time_points)[:-1]
                 # recon_right_bounds = rearrange(img_recon_dynamic, '(t b) c h w -> t b c h w', t=num_time_points)[1:]
+                # recon_right_bounds = rearrange(img_recon_dynamic, '(t b) c h w -> t b c h w', t=num_time_points)[1:]
                 # recon_left_bounds = rearrange(recon_left_bounds, 't b c h w -> (t b) c h w')
                 # recon_right_bounds = rearrange(recon_right_bounds, 't b c h w -> (t b) c h w')
                 wass_loss = torch.tensor(0.0, device=device)
@@ -729,13 +730,13 @@ def train_model(experiment_directory):
             elif lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
                 if not use_path_reg:
                     # Get reconstructions used for the regularizer
-                    img_recon_reg = decoder(zt_regs.reshape(-1, latent_dim))
+                    xs_dynamic_preds = decoder(zt_regs.reshape(-1, latent_dim))
 
                     # Get the left hand points and the right hand points for the regularizer
                     z_t_for_recon_left = zt_pred[:num_reg_points]
                     z_t_for_recon_right = zt_pred[num_reg_points:]
-                    img_recon_reg_left = img_recon_reg[:(num_reg_points * batch_size_dynamic), ...]
-                    img_recon_reg_right = img_recon_reg[(num_reg_points * batch_size_dynamic):, ...]
+                    xs_dynamic_preds_left = xs_dynamic_preds[:(num_reg_points * batch_size_dynamic), ...]
+                    xs_dynamic_preds_right = xs_dynamic_preds[(num_reg_points * batch_size_dynamic):, ...]
 
                     # Calculate dynamic regularization
                     if lambda_motion_lat > 0:
@@ -744,12 +745,12 @@ def train_model(experiment_directory):
                         latent_motion_prior = torch.tensor(0.0, device=device)
 
                     if lambda_motion_l2 > 0:
-                        image_motion_prior_l2 = torch.mean((img_recon_reg_right - img_recon_reg_left) ** 2)
+                        image_motion_prior_l2 = torch.mean((xs_dynamic_preds_right - xs_dynamic_preds_left) ** 2)
                     else:
                         image_motion_prior_l2 = torch.tensor(0.0, device=device)
 
                     if lambda_motion_ot > 0:
-                        image_motion_prior_ot = wasserstein_dist(img_recon_reg_right, img_recon_reg_left)
+                        image_motion_prior_ot = wasserstein_dist(xs_dynamic_preds_right, xs_dynamic_preds_left)
                     else:
                         image_motion_prior_ot = torch.tensor(0.0, device=device)
                         barycenter_loss = torch.tensor(0.0, device=device)
