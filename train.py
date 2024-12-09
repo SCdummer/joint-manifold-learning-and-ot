@@ -109,6 +109,7 @@ def evaluate_random_dynamic_train_reconstructions(
 
     # Initialize a figure for the latent space
     fig_latent, ax_latent = plt.subplots()
+    cmap = plt.cm.get_cmap('hsv', len(dataloader))
 
     # Create a figure for each of the inputs and save it to the correct directory
     for i, (time_series, _) in enumerate(dataloader):
@@ -232,8 +233,7 @@ def evaluate_random_dynamic_train_reconstructions(
 
         # Finally, get a plot of the latent space in case the latent dimension equals 2
         if encoder.latent_dim == 2:
-            cmap = plt.cm.get_cmap('hsv', len(dataloader))
-            batch = time_series.squeeze().unsqueeze(1)
+            batch = time_series.squeeze().unsqueeze(1)[::time_subsampling]
             _, z_thing, _ = encoder(batch.to('cuda'))
             end_time = nabla_t * time_subsampling * (z_thing.size(0) - 1)
             t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling * (z_thing.size(0) - 1) + 1).to(device)
@@ -247,7 +247,7 @@ def evaluate_random_dynamic_train_reconstructions(
             z_t_thing = z_t_thing.detach().cpu().numpy().squeeze()
             one_step_pred = one_step_pred.detach().cpu().numpy().squeeze()
             ax_latent.scatter(z_thing[:, 0], z_thing[:, 1], s=60, c=cmap(i))
-            ax_latent.scatter(z_t_thing[:, 0], z_t_thing[:, 1], s=5, c=cmap(i), marker="x")
+            ax_latent.scatter(z_t_thing[:, 0], z_t_thing[:, 1], s=5, c='b', marker="x")
             ax_latent.scatter(one_step_pred[:, 0], one_step_pred[:, 1], s=5, c=cmap(len(dataloader) - i - 1),
                               marker="*")
 
@@ -697,6 +697,7 @@ def train_model(experiment_directory):
             loss_latent_recon = recon_loss(zs_static[num_time_series:, ...], stack_rearrange(zt_pred)[num_time_series:, ...])
 
             if lambda_motion_ot > 0 and specs["OT_regularizer_type"] == "barycenter":
+
                 img_recon_reg = decoder(stack_rearrange(zt_regs))
                 # Then for each of the random numbers, we look at the interval it belongs to
                 intval_idx = torch.floor(t_rand / (nabla_t * time_subsampling)).int()
