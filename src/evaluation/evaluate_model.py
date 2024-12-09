@@ -10,7 +10,7 @@ import argparse
 import json
 
 # Code related to the datasets that we use
-from src.data.datasets import CellData
+from src.data.datasets import HeLaCellsSuccessive
 
 # Remaining libraries
 import numpy as np
@@ -95,7 +95,7 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir):
     
     # Define the dataset
     data_source = os.path.join(os.path.dirname(__file__), "..", "..", specs["DataSource"])
-    dynamic_dataset_test = CellData(data_source, time_step=1, dynamic=True, full_time_series=True)
+    dynamic_dataset_test = HeLaCellsSuccessive(data_source, full_time_series=True)
 
     # Get the number of time series
     num_time_series = len(dynamic_dataset_test.all_images_per_track)

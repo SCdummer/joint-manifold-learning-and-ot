@@ -107,6 +107,9 @@ def evaluate_random_dynamic_train_reconstructions(
     # Change the mode of the models to evaluation
     change_model_mode(encoder, decoder, time_warper, 'eval')
 
+    # Initialize a figure for the latent space
+    fig_latent, ax_latent = plt.subplots()
+
     # Create a figure for each of the inputs and save it to the correct directory
     for i, (time_series, _) in enumerate(dataloader):
 
@@ -227,8 +230,35 @@ def evaluate_random_dynamic_train_reconstructions(
         })
         p_bar.set_postfix(metrics_dict)
 
-        if i == 4:
-            break
+        # Finally, get a plot of the latent space in case the latent dimension equals 2
+        if encoder.latent_dim == 2:
+            cmap = plt.cm.get_cmap('hsv', len(dataloader))
+            batch = time_series.squeeze().unsqueeze(1)
+            _, z_thing, _ = encoder(batch.to('cuda'))
+            end_time = nabla_t * time_subsampling * (z_thing.size(0) - 1)
+            t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling * (z_thing.size(0) - 1) + 1).to(device)
+            z_t_thing = time_warper(z_thing[0, ...][None, ...], t)
+            z_t_thing = torch.cat([z_t_thing[0, ...][None, ...], z_t_thing[time_subsampling::time_subsampling]], dim=0)
+            one_step_pred = time_warper(z_thing, torch.linspace(0.0, nabla_t * time_subsampling,
+                                                                num_int_steps * time_subsampling + 1).to(device))
+
+            one_step_pred = torch.cat([z_thing[0, ...][None, ...], one_step_pred[-1, ...][:-1, ...]], dim=0)
+            z_thing = z_thing.detach().cpu().numpy()
+            z_t_thing = z_t_thing.detach().cpu().numpy().squeeze()
+            one_step_pred = one_step_pred.detach().cpu().numpy().squeeze()
+            ax_latent.scatter(z_thing[:, 0], z_thing[:, 1], s=60, c=cmap(i))
+            ax_latent.scatter(z_t_thing[:, 0], z_t_thing[:, 1], s=5, c=cmap(i), marker="x")
+            ax_latent.scatter(one_step_pred[:, 0], one_step_pred[:, 1], s=5, c=cmap(len(dataloader) - i - 1),
+                              marker="*")
+
+    # Save the latent figure
+    save_dir = os.path.join(
+        experiment_directory, "Figures", "Latent space")
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    fig_latent.savefig(os.path.join(save_dir, "{}.png".format(epoch)))
+
+    plt.close('all')
 
     # Change the mode of the models back to train
     change_model_mode(encoder, decoder, time_warper, 'train')
@@ -393,7 +423,7 @@ def train_model(experiment_directory):
     root_dir = specs["DataSource"]
     eval_on = specs["EvalOn"]
     if eval_on not in ['train', 'val']:
-        raise ValueError("The option EvalOn should be 'train' or 'eval'")
+        raise ValueError("The option EvalOn should be 'train' or 'val'")
     static_dataset_tr = dataset_class(
         root_dir, split='train', seed=42, test_size=0.2,
         subsampling=time_subsampling, n_successive=0
@@ -607,7 +637,7 @@ def train_model(experiment_directory):
 
             # We need to subsample in case we use a non-adaptive method
             if not time_warper.adaptive:
-                z_t_for_recon = z_t_for_recon[::time_subsampling]
+                z_t_for_recon = z_t_for_recon[::(num_int_steps * time_subsampling)]
 
             # z_static at time point i+1 - z_static at time point i
             diff_z_static = torch.diff(torch.stack(torch.chunk(z_static, specs["N"], dim=0), dim=0), dim=0)
@@ -615,6 +645,8 @@ def train_model(experiment_directory):
             # Loss on whether the static latent codes are relative close and not too large
             latent_regularizer = (0.1 * recon_loss(diff_z_static, torch.zeros_like(diff_z_static)) +
                                   0.02 * recon_loss(z_static, torch.zeros_like(z_static)))
+
+            num_time_series = z_t_for_recon.size(1)
 
             # Decode everything
             if joint_learning:
@@ -624,27 +656,27 @@ def train_model(experiment_directory):
                 # # Get the reconstruction loss
                 if log_var_static is None:
                     loss_recon_static = recon_loss(imgs, img_recon_static)
-                    loss_recon_dynamic = recon_loss(imgs[batch_size_dynamic:], img_recon_dynamic[batch_size_dynamic:])
+                    loss_recon_dynamic = recon_loss(imgs[num_time_series:], img_recon_dynamic[num_time_series:])
                     latent_regularizer = torch.tensor(0.0).to(device)
                     loss_recon = loss_recon_static + lambda_recon_dynamic * loss_recon_dynamic
                 else:
-                    vae_loss_static, loss_recon_static, _ = vae_recon_loss(imgs, img_recon_static, mu_static,
-                                                                               log_var_static)
-                    loss_recon_dynamic = recon_loss(imgs, img_recon_dynamic)
+                    vae_loss_static, loss_recon_static, _ = vae_recon_loss(imgs, img_recon_static, mu_static, log_var_static)
+                    loss_recon_dynamic = recon_loss(imgs[num_time_series:], img_recon_dynamic[num_time_series:])
                     latent_regularizer = torch.tensor(0.0).to(device)
                     loss_recon = vae_loss_static + lambda_recon_dynamic * loss_recon_dynamic
 
             else:
                 img_recon_dynamic = decoder(rearrange(z_t_for_recon, "t b l -> (t b) l"))
                 loss_recon_static = torch.tensor(0.0, device=device)
-                loss_recon_dynamic = recon_loss(imgs[batch_size_dynamic:], img_recon_dynamic[batch_size_dynamic:])
+                loss_recon_dynamic = recon_loss(imgs[num_time_series:], img_recon_dynamic[num_time_series:])
                 loss_recon = loss_recon_static + lambda_recon_dynamic * loss_recon_dynamic
 
             # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
-            loss_latent_recon = recon_loss(z_static[batch_size_dynamic:, ...], rearrange(z_t_for_recon, "t b l -> (t b) l")[batch_size_dynamic:, ...])
+            loss_latent_recon = recon_loss(z_static[num_time_series:, ...], rearrange(z_t_for_recon, "t b l -> (t b) l").contiguous()[num_time_series:, ...])
 
             # Get reconstructions used for the regularizer
-            img_recon_reg = decoder(rearrange(z_t_for_reg, "t b l -> (t b) l").contiguous())
+            if lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
+                img_recon_reg = decoder(rearrange(z_t_for_reg, "t b l -> (t b) l").contiguous())
 
             if lambda_motion_ot > 0 and specs["OT_regularizer_type"] == "barycenter":
                 # Then for each of the random numbers, we look at the interval it belongs to
@@ -706,14 +738,17 @@ def train_model(experiment_directory):
             elif lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
 
                 # Get the left hand points and the right hand points for the regularizer
-                z_t_for_recon_left = z_t_for_recon[:num_reg_points]
-                z_t_for_recon_right = z_t_for_recon[num_reg_points:]
-                img_recon_reg_left = img_recon_reg[:(num_reg_points * batch_size_dynamic), ...]
-                img_recon_reg_right = img_recon_reg[(num_reg_points * batch_size_dynamic):, ...]
+                img_recon_reg = rearrange(img_recon_reg, "(t b) c h w -> t b c h w", t=2 * num_reg_points).contiguous()
+                z_t_for_reg_left = z_t_for_reg[:num_reg_points]
+                z_t_for_reg_right = z_t_for_reg[num_reg_points:]
+                img_recon_reg_left = img_recon_reg[:num_reg_points]
+                img_recon_reg_left = rearrange(img_recon_reg_left, "t b c h w -> (t b) c h w").contiguous()
+                img_recon_reg_right = img_recon_reg[num_reg_points:]
+                img_recon_reg_right = rearrange(img_recon_reg_right, "t b c h w -> (t b) c h w").contiguous()
 
                 # Calculate dynamic regularization
                 if lambda_motion_lat > 0:
-                    latent_motion_prior = torch.mean(torch.diff(z_t_for_recon_right - z_t_for_recon_left) ** 2)
+                    latent_motion_prior = torch.mean(torch.diff(z_t_for_reg_right - z_t_for_reg_left) ** 2)
                 else:
                     latent_motion_prior = torch.tensor(0.0, device=device)
 
@@ -732,9 +767,9 @@ def train_model(experiment_directory):
             else:
                 latent_motion_prior = torch.tensor(0.0, device=device)
                 image_motion_prior_l2 = torch.tensor(0.0, device=device)
-                image_motion_prior_ot = torch.tensor(0.0, device=device)
                 barycenter_loss = torch.tensor(0.0, device=device)
                 wass_loss = torch.tensor(0.0, device=device)
+                image_motion_prior_ot = barycenter_loss + lambda_wass_loss * wass_loss
 
             loss_motion_prior = lambda_motion_lat * latent_motion_prior + lambda_motion_l2 * image_motion_prior_l2 + lambda_motion_ot * image_motion_prior_ot
 
