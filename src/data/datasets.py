@@ -11,21 +11,21 @@ from torchvision.datasets import VisionDataset
 
 
 class BaseDataset(VisionDataset):
-    #IMG_SIZE = (64, 64)
-
     DEFAULT_TRANSFORM = T.Compose([
         T.ToTensor(),
     ])
 
-    # BASE_FOLDER = 'Fluo-N2DL-HeLa'
-    # TRACKS_FOLDER = '01_processed'
-
     EXTENSION = 'tif'
 
     def __init__(self, root, split='train', seed=None, test_size=0.2, transform=None, full_time_series=False):
-        #root = Path(root, self.BASE_FOLDER, self.TRACKS_FOLDER)
-        root = Path(root)
-        super(BaseDataset, self).__init__(root)
+        super(BaseDataset, self).__init__(root=Path(root))
+
+        if not self.root.exists():
+            # extract the zip file which has the same name as the root folder + '.zip'
+            import zipfile
+            zip_file = self.root.with_suffix('.zip')
+            with zipfile.ZipFile(zip_file, 'r') as z:
+                z.extractall(root.parent)
 
         # get all the tracks, these are folders in the root_dir
         tracks = [d for d in root.iterdir() if d.is_dir() and re.match(r'Track\d+', d.name)]
@@ -128,7 +128,8 @@ class HeLaCellsSuccessive(BaseDataset):
                 self.image_tracks[track_id].append(
                     (
                         images[i:i + mult * n_successive + 1:mult],
-                        ((start_time - self.start_time + i) / self.end_time, (start_time - self.start_time + i + n_successive * mult) / self.end_time)
+                        ((start_time - self.start_time + i) / self.end_time,
+                         (start_time - self.start_time + i + n_successive * mult) / self.end_time)
                     )
                 )
                 self.sample_weights.append(self.track_weights[track])
