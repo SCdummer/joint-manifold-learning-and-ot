@@ -48,7 +48,7 @@
     "UseWandb": false,
     "Continue": false,
     "h": 0.1,
-    "NumRegPoints": 0,
+    "NumRegPoints": 3,
     "UsePathReg": true,
     "LambdaReconDynamic": 10.0,
     "LambdaDynRegLat": 0.0,
