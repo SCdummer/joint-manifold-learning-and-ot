@@ -703,7 +703,11 @@ def train_model(experiment_directory):
                 intval_idx = torch.floor(t_rand / (nabla_t * time_subsampling)).int()
 
                 # Get the points where we have data and that correspond to the regularization ones
-                barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
+                #barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
+                if specs["UseGTboundaries"]:
+                    barycenter_boundaries = time_rearrange(xs, n)
+                else:
+                    barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
                 bary_center_boundaries_normalization_factor = torch.sum(barycenter_boundaries, dim=(2, 3, 4), keepdim=True)
                 barycenter_boundaries = barycenter_boundaries / bary_center_boundaries_normalization_factor
                 barycenter_boundary_left, barycenter_boundary_right = barycenter_boundaries[intval_idx], \
@@ -720,6 +724,7 @@ def train_model(experiment_directory):
 
                 # Calculate the barycenters
                 barycenters = convolutional_barycenter_calculation(img_pairs, weights=weights, scaling=0.95, need_diffable=True)
+
                 if detach_barycenter:
                     barycenters = barycenters.detach()
 
