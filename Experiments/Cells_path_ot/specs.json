@@ -1,5 +1,5 @@
 {
-    "DataSource": "data/Fluo-N2DL-HeLa/images",
+    "DataSource": "data/Fluo-N2DL-HeLa/01_processed",
     "EncoderSpecs": {
         "num_filters": [
             512,
