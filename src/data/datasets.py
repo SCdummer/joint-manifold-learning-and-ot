@@ -25,10 +25,10 @@ class BaseDataset(VisionDataset):
             import zipfile
             zip_file = self.root.with_suffix('.zip')
             with zipfile.ZipFile(zip_file, 'r') as z:
-                z.extractall(root.parent)
+                z.extractall(self.root.parent)
 
         # get all the tracks, these are folders in the root_dir
-        tracks = [d for d in root.iterdir() if d.is_dir() and re.match(r'Track\d+', d.name)]
+        tracks = [d for d in self.root.iterdir() if d.is_dir() and re.match(r'Track\d+', d.name)]
         print(f'Found {len(tracks)} tracks')
         # print the minimum and maximum number of images in a track
         print(
