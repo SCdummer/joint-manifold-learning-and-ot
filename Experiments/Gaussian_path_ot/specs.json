@@ -1,5 +1,5 @@
 {
-    "DataSource": "data/Circle_gaussian_large/images",
+    "DataSource": "data/Small_circle_gaussian_small/images",
     "EncoderSpecs": {
         "num_filters": [
             512,
