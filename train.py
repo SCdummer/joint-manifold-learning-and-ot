@@ -53,7 +53,7 @@ def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr,
         optimizer_all = torch.optim.Adam(time_warper.parameters(), lr=init_lr)
 
     # Define the scheduler
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer_all, gamma=0.9955)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer_all, gamma=0.99955)
 
     # Return them
     return optimizer_all, scheduler
@@ -280,6 +280,11 @@ def evaluate_random_static_train_reconstructions(
     # Encode and decode them
     z, _, _ = encoder(inputs)
     recon = decoder(z)
+
+    most_common_val = decoder.most_common_val
+    if most_common_val > 0.0:
+        recon = most_common_val + (1.0 - most_common_val) * recon[:, 0, ...] - most_common_val * recon[:, 1, ...]
+        recon = recon[:, None, ...]
 
     # Get the loss value
     losses = (torch.sum((recon - inputs) ** 2, dim=(1, 2, 3)) / (recon.shape[1] * recon.shape[2] * recon.shape[3]))
@@ -512,7 +517,15 @@ def train_model(experiment_directory):
             recon = decoder(z)
 
             # Calculate the reconstruction loss
-            loss_recon = recon_loss(recon, xs)
+            most_common_val = specs["DecoderSpecs"]['most_common_val']
+            if specs["DecoderSpecs"]['most_common_val'] > 0.0:
+                target_out_1 = (xs - most_common_val) * (xs >= most_common_val) / (1.0 - most_common_val)
+                target_out_2 = (most_common_val - xs) * (xs <= most_common_val) / most_common_val
+                loss_recon = 0.5 * (recon_loss(recon[:, 0, ...][:, None, ...], target_out_1) + recon_loss(recon[:, 1, ...][:, None, ...], target_out_2))
+                # recon = most_common_val + (1.0 - most_common_val) * recon[:, 0, ...] - most_common_val * recon[:, 1, ...]
+                # recon = recon[:, None, ...]
+            else:
+                loss_recon = recon_loss(recon, xs)
 
             # Backpropagate and update the network parameters
             loss_recon.backward()
@@ -532,6 +545,10 @@ def train_model(experiment_directory):
                 xs = xs.to(device)
                 z, _, _ = encoder(xs)
                 recon = decoder(z)
+                if specs["DecoderSpecs"]['most_common_val'] > 0.0:
+                    recon = most_common_val + (1.0 - most_common_val) * recon[:, 0, ...] - most_common_val * recon[:, 1,
+                                                                                                             ...]
+                    recon = recon[:, None, ...]
                 val_loss += recon_loss(recon, xs).item()
             val_loss /= len(val_dataloader_static)
             metrics_dict.update({'val/recon': val_loss})
@@ -718,9 +735,13 @@ def train_model(experiment_directory):
                             nabla_t * time_subsampling)
                 weights_right = 1.0 - weights_left
                 weights = torch.stack([weights_left, weights_right], dim=0)[..., None, None, None, None]
+                print(img_pairs.size())
                 weights = weights.expand(-1, -1, img_pairs.size(2), -1, -1, -1)
+                print(weights.size())
                 img_pairs = rearrange(img_pairs, 'm t b c h w -> m (t b) c h w')
                 weights = rearrange(weights, 'm t b c h w -> m (t b) c h w')
+                print(img_pairs.size())
+                print(weights.size())
 
                 # Calculate the barycenters
                 barycenters = convolutional_barycenter_calculation(img_pairs, weights=weights, scaling=0.95, need_diffable=True)

@@ -30,6 +30,14 @@ class BaseDataset(VisionDataset):
         # get all the tracks, these are folders in the root_dir
         tracks = [d for d in self.root.iterdir() if d.is_dir() and re.match(r'Track\d+', d.name)]
         print(f'Found {len(tracks)} tracks')
+
+        # get the extension of the tracks and make sure it is a unique extension
+        extensions = [suffix for d in tracks for suffix in [path.suffix for path in list(d.glob(f'*.*'))]]
+        if not len(set(extensions)) == 1:
+            raise ValueError("Dataset at path {} does not have a unique extension for the images. We found: {}".format(self.root, set(extensions)))
+        else:
+            self.EXTENSION = extensions[0][1:]
+
         # print the minimum and maximum number of images in a track
         print(
             'Min number of images:', min(
@@ -171,7 +179,7 @@ class HeLaCellsSuccessive(BaseDataset):
         else:
             xs, times = self.flat_image_tracks[idx]
             t = torch.linspace(times[0], times[1], steps=self.n_successive + 1, dtype=torch.float32)
-        xs = [np.array(Image.open(x), dtype=np.float32)[..., None] for x in xs]
+        xs = [np.array(Image.open(x))[..., None] for x in xs]
         xs = [self.transform(x) for x in xs]
         return xs, t
 

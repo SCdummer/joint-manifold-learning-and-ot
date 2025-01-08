@@ -10,7 +10,7 @@
         "img_dims": [
             1,
             64,
-            64
+            80
         ],
         "use_vae": false
     },
@@ -37,8 +37,8 @@
     "NumIntSteps": 1,
     "N": 4,
     "Nabla_t": 0.1,
-    "NumEpochsStatic": 500,
-    "NumEpochsDynamic": 500,
+    "NumEpochsStatic": 2,
+    "NumEpochsDynamic": 2,
     "JointLearning": true,
     "BatchSizeStatic": 64,
     "BatchSizeDynamic": 16,
@@ -49,13 +49,14 @@
     "Continue": false,
     "h": 0.1,
     "NumRegPoints": 0,
-    "UsePathReg": true,
+    "UsePathReg": false,
     "LambdaReconDynamic": 10.0,
     "LambdaDynRegLat": 0.0,
     "LambdaDynRegL2": 0.0,
-    "LambdaDynRegOT": 0.0,
+    "LambdaDynRegOT": 0.01,
     "LambdaWassLoss": 0.0,
     "DetachBarycenter": false,
-    "OT_regularizer_type": "other",
-    "BarycenterScaling": "avg_intensity"
+    "OT_regularizer_type": "barycenter",
+    "BarycenterScaling": "avg_intensity",
+    "UseGTboundaries": false
 }

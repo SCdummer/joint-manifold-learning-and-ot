@@ -5,7 +5,7 @@ Taken the Generator (and renamed to Decoder) from https://github.com/drorsimon/i
 import torch
 
 class Decoder(torch.nn.Module):
-    def __init__(self, latent_dim, num_filters, upsample_size):
+    def __init__(self, latent_dim, num_filters, upsample_size, most_common_val=0.0):
         super(Decoder, self).__init__()
 
         # Save latent dimensions
@@ -42,7 +42,11 @@ class Decoder(torch.nn.Module):
         self.output_layer = torch.nn.Sequential()
 
         # Deconvolutional layer
-        out = torch.nn.ConvTranspose2d(num_filters[i], 1, kernel_size=4, stride=2, padding=1)
+        self.most_common_val = most_common_val
+        if self.most_common_val == 0.0:
+            out = torch.nn.ConvTranspose2d(num_filters[i], 1, kernel_size=4, stride=2, padding=1)
+        else:
+            out = torch.nn.ConvTranspose2d(num_filters[i], 2, kernel_size=4, stride=2, padding=1)
         self.output_layer.add_module('out', out)
         torch.nn.init.normal_(out.weight, mean=0.0, std=0.02)
         torch.nn.init.constant_(out.bias, 0.0)
@@ -59,3 +63,8 @@ class Decoder(torch.nn.Module):
         x = self.hidden_layer(x)
         out = self.output_layer(x)
         return out
+        # if self.most_common_val == 0.0:
+        #     return out
+        # else:
+        #     out = self.most_common_val + (1.0 - self.most_common_val) * out[:, 0, ...] - self.most_common_val * out[:, 1, ...]
+        #     return out[:, None, ...]

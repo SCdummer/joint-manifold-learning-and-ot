@@ -1,6 +1,6 @@
 # Import libraries and functions required for calculating the barycenters
 import torch
-from IPython.core.pylabtools import figsize
+
 from sklearn.decomposition import PCA
 
 # Import code for creating visualization
@@ -8,7 +8,7 @@ from src.visualization.create_recon_visualizations import create_time_series_gif
 
 # Import libraries for parsing inputs, for loading things, and for saving things
 import os
-import argparse
+
 import json
 
 # Code related to the datasets that we use
