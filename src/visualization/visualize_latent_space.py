@@ -104,8 +104,12 @@ def visualize_latent_space(dataset_train_location, dataset_test_location, encode
     colors = cm.rainbow(np.linspace(0, 1, t_unique.shape[0]))
     for t, c in zip(t_unique, colors):
         lat_train = embedding_train[t_train==t, ...]
-        plt.scatter(lat_train[:, 0], lat_train[:, 1], color=c)
-
+        plt.scatter(lat_train[:, 0], lat_train[:, 1], color=c)#, vmin=colors.min(), vmax=colors.max())
+    norm = plt.Normalize(np.min(t_unique), np.max(t_unique))
+    sm = plt.cm.ScalarMappable(cmap='rainbow', norm=norm)#plt.cm.get_cmap('rainbow'), norm=norm)
+    sm.set_array([])
+    fig.colorbar(sm, ax=ax)
+    plt.show()
     # Save the plot
     save_dir = os.path.join(experiment_directory, "Figures", "Latent plots", str(epoch))
     if not os.path.isdir(save_dir):
