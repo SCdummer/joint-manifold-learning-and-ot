@@ -25,17 +25,20 @@ from src.utils.loading_and_saving import load_model
 # Remaining libraries
 import argparse
 import json
+import random
 
 # Define the device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+random.seed(42)
 
-def get_latents(dataset_location, encoder):
+def get_latents(dataset_location, encoder, num_samples):
 
     # We are going to treat each track separately and save the encodings in a dictionary
     transform = ToTensor()
     encoding_dict = {}
-    time_dict = {}
-    for folder_name in os.listdir(dataset_location):
+    folders = os.listdir(dataset_location)
+    folders = random.sample(folders, num_samples)
+    for folder_name in folders:
         track_id = int(folder_name[5:])
         folder = os.path.join(dataset_location, folder_name)
         imgs_t = []
@@ -60,11 +63,11 @@ def get_latents(dataset_location, encoder):
         encoding_dict[track_id]["times"] = times
     return encoding_dict
 
-def visualize_latent_space(dataset_train_location, dataset_test_location, encoder, visualization_type, epoch):
+def visualize_latent_space(dataset_train_location, dataset_test_location, encoder, visualization_type, epoch, num_samples):
 
     # Get the latent codes
-    encoding_dict_train = get_latents(dataset_train_location, encoder)
-    encoding_dict_test = get_latents(dataset_test_location, encoder)
+    encoding_dict_train = get_latents(dataset_train_location, encoder, num_samples)
+    encoding_dict_test = get_latents(dataset_test_location, encoder, num_samples)
 
     # Get the latent codes and times into array format
     z_t_train = np.concatenate([encoding_dict_train[track_id]["img_data"] for track_id in encoding_dict_train], axis=0)
@@ -110,6 +113,7 @@ def visualize_latent_space(dataset_train_location, dataset_test_location, encode
     sm.set_array([])
     fig.colorbar(sm, ax=ax)
     plt.show()
+
     # Save the plot
     save_dir = os.path.join(experiment_directory, "Figures", "Latent plots", str(epoch))
     if not os.path.isdir(save_dir):
@@ -145,6 +149,15 @@ if __name__ == "__main__":
         default="PHATE",
         # required=True,
         help="The type of dimensionality reduction used for visualizing the latent space.",
+    )
+    arg_parser.add_argument(
+        "--num_samples",
+        "-n",
+        dest="num_samples",
+        default=10,
+        type=int,
+        # required=True,
+        help="The number of samples to display in the latent space plot.",
     )
     args = arg_parser.parse_args()
     experiment_directory = args.experiment_directory
@@ -192,4 +205,4 @@ if __name__ == "__main__":
     # Get the latent plots
     dataset_train_location = specs["DataSource"]
     dataset_test_location = specs["DataSourceTest"]
-    visualize_latent_space(dataset_train_location, dataset_test_location, encoder, args.visualization_type, epoch)
+    visualize_latent_space(dataset_train_location, dataset_test_location, encoder, args.visualization_type, epoch, args.num_samples)
