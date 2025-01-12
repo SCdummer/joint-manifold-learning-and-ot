@@ -17,7 +17,7 @@ import matplotlib.cm as cm
 # Load the models
 from src.models.encoders import Encoder
 # from src.models.decoders import Decoder
-# from src.models.latent_warpers import NeuralODE
+from src.models.latent_warpers import NeuralODE
 
 # Get some code that can load the models
 from src.utils.loading_and_saving import load_model
@@ -31,7 +31,7 @@ import random
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 random.seed(42)
 
-def get_latents(dataset_location, encoder):
+def get_latents(dataset_location, encoder, time_warper, nabla_t, num_int_steps):
 
     # We are going to treat each track separately and save the encodings in a dictionary
     transform = ToTensor()
@@ -57,7 +57,13 @@ def get_latents(dataset_location, encoder):
         imgs_torch = imgs_torch.to(device)
         encoding_dict[track_id] = {}
         if encoder is not None:
-            encoding_dict[track_id]["img_data"] = encoder(imgs_torch)[1].cpu().detach().numpy()
+            if time_warper is None:
+                encoding_dict[track_id]["img_data"] = encoder(imgs_torch)[1].cpu().detach().numpy()
+            else:
+                z0 = encoder(imgs_torch[0, ...])[1]
+                t = torch.linspace(0, (imgs_torch.size(0) - 1) * nabla_t,
+                                   (imgs_torch.size(0) - 1) * num_int_steps + 1).to(device)
+                encoding_dict[track_id]["img_data"] = time_warper(z0[None, ...], t).cpu().detach().numpy().squeeze()
         else:
             encoding_dict[track_id]["img_data"] = imgs_torch.flatten(start_dim=1).cpu().detach().numpy()
         encoding_dict[track_id]["start_time"] = start_time
@@ -65,11 +71,12 @@ def get_latents(dataset_location, encoder):
         encoding_dict[track_id]["times"] = times
     return encoding_dict
 
-def visualize_latent_space(dataset_train_location, dataset_test_location, encoder, visualization_type, epoch, num_samples):
+def visualize_latent_space(dataset_train_location, dataset_test_location, encoder, time_warper,
+                           visualization_type, epoch, num_samples, nabla_t, num_int_steps):
 
     # Get the latent codes
-    encoding_dict_train = get_latents(dataset_train_location, encoder)
-    encoding_dict_test = get_latents(dataset_test_location, encoder)
+    encoding_dict_train = get_latents(dataset_train_location, encoder, time_warper, nabla_t, num_int_steps)
+    encoding_dict_test = get_latents(dataset_test_location, encoder, time_warper, nabla_t, num_int_steps)
 
     # Get a random sample of the track_id's
     if num_samples is not None and isinstance(num_samples, int):
@@ -146,7 +153,9 @@ def visualize_latent_space(dataset_train_location, dataset_test_location, encode
     save_dir = os.path.join(experiment_directory, "Figures", "Latent plots", str(epoch))
     if not os.path.isdir(save_dir):
         os.makedirs(save_dir)
-    fig.savefig(os.path.join(save_dir, "Latent_space_{}_train_only.png".format(visualization_type)))
+    substring = "dynamic" if time_warper is not None else "static"
+    substring = substring if encoder is not None else "image"
+    fig.savefig(os.path.join(save_dir, "Latent_space_{}_train_only_{}.png".format(visualization_type, substring)))
 
     # Close the figures
     plt.close('all')
@@ -188,6 +197,8 @@ if __name__ == "__main__":
     )
     arg_parser.add_argument('--image_based_plot', dest='image_based_plot',
                             action=argparse.BooleanOptionalAction)
+    arg_parser.add_argument('--dynamic', dest='dynamic',
+                            action=argparse.BooleanOptionalAction)
     args = arg_parser.parse_args()
     try:
         num_samples = None if args.num_samples is None else int(args.num_samples)
@@ -218,29 +229,37 @@ if __name__ == "__main__":
     # Get the parameters for the encoder, decoder, and latent warper
     encoder_specs = specs['EncoderSpecs']
     # decoder_specs = specs['DecoderSpecs']
-    # time_warper_specs = specs['TimeWarperSpecs']
+    time_warper_specs = specs['TimeWarperSpecs']
 
     # Define the models
     if not args.image_based_plot:
         encoder = Encoder(latent_dim, **encoder_specs)
         encoder = encoder.to(device)
         # decoder = Decoder(latent_dim, **decoder_specs, upsample_size=encoder.output_size)
-        # time_warper = NeuralODE(latent_dim, **time_warper_specs)
+        time_warper = NeuralODE(latent_dim, **time_warper_specs)
+        time_warper = time_warper.to(device)
 
         # Put the models in evaluation mode
         encoder.eval()
         # decoder.eval()
-        # time_warper.eval()
+        time_warper.eval()
 
         # Load the correct parameters
         epoch = load_model(experiment_directory, encoder, 'encoder', 'dynamic', 'latest.pth')
         # load_model(experiment_directory, decoder, 'decoder', 'dynamic', 'latest.pth')
-        # load_model(experiment_directory, time_warper, 'time_warper', 'dynamic', 'latest.pth')
+        load_model(experiment_directory, time_warper, 'time_warper', 'dynamic', 'latest.pth')
+
+        if not args.dynamic:
+            time_warper = None
     else:
         encoder = None
+        time_warper = None
         epoch = 0
 
     # Get the latent plots
     dataset_train_location = specs["DataSource"]
     dataset_test_location = specs["DataSourceTest"]
-    visualize_latent_space(dataset_train_location, dataset_test_location, encoder, args.visualization_type, epoch, num_samples)
+    nabla_t = specs["Nabla_t"]
+    num_int_steps = specs["NumIntSteps"]
+    visualize_latent_space(dataset_train_location, dataset_test_location, encoder, time_warper,
+                           args.visualization_type, epoch, num_samples, nabla_t, num_int_steps)
