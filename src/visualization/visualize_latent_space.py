@@ -31,13 +31,12 @@ import random
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 random.seed(42)
 
-def get_latents(dataset_location, encoder, num_samples):
+def get_latents(dataset_location, encoder):
 
     # We are going to treat each track separately and save the encodings in a dictionary
     transform = ToTensor()
     encoding_dict = {}
     folders = os.listdir(dataset_location)
-    folders = random.sample(folders, num_samples)
     for folder_name in folders:
         track_id = int(folder_name[5:])
         folder = os.path.join(dataset_location, folder_name)
@@ -57,7 +56,10 @@ def get_latents(dataset_location, encoder, num_samples):
         imgs_torch = torch.stack([transform(np.array(img, dtype=np.float32)[..., None]) for img in imgs_t], dim=0)
         imgs_torch = imgs_torch.to(device)
         encoding_dict[track_id] = {}
-        encoding_dict[track_id]["img_data"] = encoder(imgs_torch)[1].cpu().detach().numpy()
+        if encoder is not None:
+            encoding_dict[track_id]["img_data"] = encoder(imgs_torch)[1].cpu().detach().numpy()
+        else:
+            encoding_dict[track_id]["img_data"] = imgs_torch.flatten(start_dim=1).cpu().detach().numpy()
         encoding_dict[track_id]["start_time"] = start_time
         encoding_dict[track_id]["end_time"] = end_time
         encoding_dict[track_id]["times"] = times
@@ -66,22 +68,36 @@ def get_latents(dataset_location, encoder, num_samples):
 def visualize_latent_space(dataset_train_location, dataset_test_location, encoder, visualization_type, epoch, num_samples):
 
     # Get the latent codes
-    encoding_dict_train = get_latents(dataset_train_location, encoder, num_samples)
-    encoding_dict_test = get_latents(dataset_test_location, encoder, num_samples)
+    encoding_dict_train = get_latents(dataset_train_location, encoder)
+    encoding_dict_test = get_latents(dataset_test_location, encoder)
+
+    # Get a random sample of the track_id's
+    if num_samples is not None and isinstance(num_samples, int):
+        chosen_track_ids = random.sample(list(encoding_dict_train.keys()), num_samples)
+        encoding_dict_train_visualize = {track_id: encoding_dict_train[track_id] for track_id in chosen_track_ids}
+    else:
+        encoding_dict_train_visualize = encoding_dict_train
+        chosen_track_ids = list(encoding_dict_train.keys())
 
     # Get the latent codes and times into array format
     z_t_train = np.concatenate([encoding_dict_train[track_id]["img_data"] for track_id in encoding_dict_train], axis=0)
     z_t_test = np.concatenate([encoding_dict_test[track_id]["img_data"] for track_id in encoding_dict_test], axis=0)
     t_train = np.concatenate([np.array(encoding_dict_train[track_id]["times"]) for track_id in encoding_dict_train], axis=0)
     t_test = np.concatenate([np.array(encoding_dict_test[track_id]["times"]) for track_id in encoding_dict_test], axis=0)
-    track_id_train = np.array([track_id for track_id in encoding_dict_train], dtype=np.int64)
+    track_id_train = np.array([track_id for track_id in encoding_dict_train
+                               for i in range(encoding_dict_train[track_id]["img_data"].shape[0])], dtype=np.int64)
     track_id_test = np.array([track_id for track_id in encoding_dict_test], dtype=np.int64)
+    z_t_train_visualize = np.concatenate([encoding_dict_train_visualize[track_id]["img_data"] for track_id in
+                                          encoding_dict_train_visualize], axis=0)
+    t_train_visualize = np.concatenate([np.array(encoding_dict_train_visualize[track_id]["times"]) for track_id in
+                                        encoding_dict_train_visualize], axis=0)
 
     # If the latent dimension equals 2, we can just plot the latent dimensions against each other. If not, we have to
     # reduce the dimensionality even more for visualization. This is done via the visualization_type method.
     latent_dim = z_t_train.shape[-1]
     if latent_dim == 2:
         embedding_train = z_t_train
+        embedding_train_visualize = z_t_train_visualize
         embedding_test = z_t_test
     else:
         if visualization_type == 'UMAP':
@@ -89,14 +105,26 @@ def visualize_latent_space(dataset_train_location, dataset_test_location, encode
             reducer = umap.UMAP(n_neighbors=15, n_components=2)
             reducer.fit(z_t_train)
             embedding_train = reducer.embedding_
+            #embedding_train_visualize = reducer.transform(z_t_train_visualize)
+            track_in_list = np.in1d(track_id_train, chosen_track_ids)
+            embedding_train_visualize = embedding_train[track_in_list]
+            t_train_visualize = t_train[track_in_list]
             embedding_test = reducer.transform(z_t_test)
         elif visualization_type == 'PHATE':
             reducer = phate.PHATE(n_components=2, knn=5)
             embedding_train = reducer.fit_transform(z_t_train)
+            #embedding_train_visualize = reducer.transform(z_t_train_visualize)
+            track_in_list = np.in1d(track_id_train, chosen_track_ids)
+            embedding_train_visualize = embedding_train[track_in_list]
+            t_train_visualize = t_train[track_in_list]
             embedding_test = reducer.transform(z_t_test)
         elif visualization_type == 'PCA':
             pca = PCA(n_components=2)
             embedding_train = pca.fit_transform(z_t_train)
+            #embedding_train_visualize = pca.transform(z_t_train_visualize)
+            track_in_list = np.in1d(track_id_train, chosen_track_ids)
+            embedding_train_visualize = embedding_train[track_in_list]
+            t_train_visualize = t_train[track_in_list]
             embedding_test = pca.transform(z_t_test)
         else:
             raise ValueError("The visualization_type variable can only be 'UMAP', 'PHATE', or 'PCA' and not {}.".format(visualization_type))
@@ -106,7 +134,7 @@ def visualize_latent_space(dataset_train_location, dataset_test_location, encode
     t_unique = np.unique(np.concatenate([t_train, t_test], axis=0))
     colors = cm.rainbow(np.linspace(0, 1, t_unique.shape[0]))
     for t, c in zip(t_unique, colors):
-        lat_train = embedding_train[t_train==t, ...]
+        lat_train = embedding_train_visualize[t_train_visualize==t, ...]
         plt.scatter(lat_train[:, 0], lat_train[:, 1], color=c)#, vmin=colors.min(), vmax=colors.max())
     norm = plt.Normalize(np.min(t_unique), np.max(t_unique))
     sm = plt.cm.ScalarMappable(cmap='rainbow', norm=norm)#plt.cm.get_cmap('rainbow'), norm=norm)
@@ -154,12 +182,18 @@ if __name__ == "__main__":
         "--num_samples",
         "-n",
         dest="num_samples",
-        default=10,
-        type=int,
+        default=None,
         # required=True,
-        help="The number of samples to display in the latent space plot.",
+        help="The number of time series to display in the latent space plot.",
     )
+    arg_parser.add_argument('--image_based_plot', dest='image_based_plot',
+                            action=argparse.BooleanOptionalAction)
     args = arg_parser.parse_args()
+    try:
+        num_samples = None if args.num_samples is None else int(args.num_samples)
+    except:
+        raise ValueError(
+            "The number of time series displayed option should be None or an integer, not {}".format(args.num_samples))
     experiment_directory = args.experiment_directory
 
     # Get the directory of the current file and via this directory, we go to the main directory
@@ -187,22 +221,26 @@ if __name__ == "__main__":
     # time_warper_specs = specs['TimeWarperSpecs']
 
     # Define the models
-    encoder = Encoder(latent_dim, **encoder_specs)
-    encoder = encoder.to(device)
-    # decoder = Decoder(latent_dim, **decoder_specs, upsample_size=encoder.output_size)
-    # time_warper = NeuralODE(latent_dim, **time_warper_specs)
+    if not args.image_based_plot:
+        encoder = Encoder(latent_dim, **encoder_specs)
+        encoder = encoder.to(device)
+        # decoder = Decoder(latent_dim, **decoder_specs, upsample_size=encoder.output_size)
+        # time_warper = NeuralODE(latent_dim, **time_warper_specs)
 
-    # Put the models in evaluation mode
-    encoder.eval()
-    # decoder.eval()
-    # time_warper.eval()
+        # Put the models in evaluation mode
+        encoder.eval()
+        # decoder.eval()
+        # time_warper.eval()
 
-    # Load the correct parameters
-    epoch = load_model(experiment_directory, encoder, 'encoder', 'dynamic', 'latest.pth')
-    # load_model(experiment_directory, decoder, 'decoder', 'dynamic', 'latest.pth')
-    # load_model(experiment_directory, time_warper, 'time_warper', 'dynamic', 'latest.pth')
+        # Load the correct parameters
+        epoch = load_model(experiment_directory, encoder, 'encoder', 'dynamic', 'latest.pth')
+        # load_model(experiment_directory, decoder, 'decoder', 'dynamic', 'latest.pth')
+        # load_model(experiment_directory, time_warper, 'time_warper', 'dynamic', 'latest.pth')
+    else:
+        encoder = None
+        epoch = 0
 
     # Get the latent plots
     dataset_train_location = specs["DataSource"]
     dataset_test_location = specs["DataSourceTest"]
-    visualize_latent_space(dataset_train_location, dataset_test_location, encoder, args.visualization_type, epoch, args.num_samples)
+    visualize_latent_space(dataset_train_location, dataset_test_location, encoder, args.visualization_type, epoch, num_samples)
