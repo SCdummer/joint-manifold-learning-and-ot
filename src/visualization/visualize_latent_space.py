@@ -144,17 +144,37 @@ def visualize_latent_space(dataset_train_location, dataset_test_location, encode
     t_unique = np.unique(np.concatenate([t_train, t_test], axis=0))
     colors = cm.rainbow(np.linspace(0, 1, t_unique.shape[0]))
     tracks_seen = []
-    for t, c in zip(t_unique, colors):
-        curr_tracks = track_id_train_visualize[t_train_visualize==t]
-        for track_id in np.unique(curr_tracks):
-            if track_id not in tracks_seen:
-                bool_arr = np.logical_and(t_train_visualize==t, track_id_train_visualize==track_id)
-                lat = embedding_train_visualize[bool_arr].squeeze()
-                print("Track with track id {} starts at time {} and at latent location"
-                      " [{:.4f}, {:.4f}]".format(track_id, t, lat[0].item(), lat[1].item()))
-                tracks_seen.append(track_id)
-            lat_train = embedding_train_visualize[t_train_visualize==t, ...]
-        plt.scatter(lat_train[:, 0], lat_train[:, 1], color=c)#, vmin=colors.min(), vmax=colors.max())
+    for track_id in encoding_dict_train_visualize:
+        bool_arr = (track_id_train_visualize == track_id)
+        lat_track = embedding_train_visualize[bool_arr, ...]
+        t = t_train_visualize[bool_arr]
+        c = colors[t]
+        ax.scatter(lat_track[:, 0], lat_track[:, 1], color=c)
+        fig_single_track, ax_single_track = plt.subplots()
+        ax_single_track.scatter(lat_track[:, 0], lat_track[:, 1], color=c)
+        ax_single_track.set_title("Track {}".format(track_id))
+
+        # Save the plot
+        save_dir = os.path.join(experiment_directory, "Figures", "Latent plots", str(epoch), "Single tracks")
+        if not os.path.isdir(save_dir):
+            os.makedirs(save_dir)
+        substring = "dynamic" if time_warper is not None else "static"
+        substring = substring if encoder is not None else "image"
+        fig_single_track.savefig(os.path.join(save_dir, "Latent_space_{}_{}_traj_{}.png".format(visualization_type, substring, track_id)))
+        plt.close(fig_single_track)
+
+    tracks_seen = []
+    # for t, c in zip(t_unique, colors):
+    #     curr_tracks = track_id_train_visualize[t_train_visualize==t]
+    #     for track_id in np.unique(curr_tracks):
+    #         if track_id not in tracks_seen:
+    #             bool_arr = np.logical_and(t_train_visualize==t, track_id_train_visualize==track_id)
+    #             lat = embedding_train_visualize[bool_arr].squeeze()
+    #             print("Track with track id {} starts at time {} and at latent location"
+    #                   " [{:.4f}, {:.4f}]".format(track_id, t, lat[0].item(), lat[1].item()))
+    #             tracks_seen.append(track_id)
+    #         lat_train = embedding_train_visualize[t_train_visualize==t, ...]
+    #     plt.scatter(lat_train[:, 0], lat_train[:, 1], color=c)#, vmin=colors.min(), vmax=colors.max())
     norm = plt.Normalize(np.min(t_unique), np.max(t_unique))
     sm = plt.cm.ScalarMappable(cmap='rainbow', norm=norm)#plt.cm.get_cmap('rainbow'), norm=norm)
     sm.set_array([])
