@@ -223,6 +223,10 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
         metrics[key] = metric_list
         if latents is not None:
             all_latents[key] = latents
+            
+    metrics_static = {}
+    for key, (metric_list, _) in track_metric_vals_static.items():
+        metrics_static[key] = metric_list
 
     all_latents_np = np.concatenate([latents for latents in all_latents.values()], axis=0)
     pca = PCA(n_components=2)
@@ -259,7 +263,7 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
     #                                     range(num_time_series)}
 
     # Finally, for every metric calculate the average and the standard deviation and save the important values
-    create_summary_statistics(track_metric_vals_static, os.path.join(save_dir, 'Static reconstructions'))
+    create_summary_statistics(metrics_static, os.path.join(save_dir, 'Static reconstructions'))
     create_summary_statistics(metrics, os.path.join(save_dir, 'Dynamic reconstructions'))
     # create_summary_statistics(track_metric_vals_train_interval, os.path.join(save_dir, 'One train interval reconstructions'))
 
