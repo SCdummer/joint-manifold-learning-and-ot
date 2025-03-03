@@ -48,7 +48,7 @@ def evaluate_time_series_recon(time_series, time_series_recon, subsampling=None)
             continue
 
         # Else, we calculate the reconstruction metrics
-        metric_list['PSNR'].append(peak_signal_noise_ratio(time_series[i].squeeze(), time_series_recon[i].squeeze()))
+        metric_list['PSNR'].append(peak_signal_noise_ratio(time_series[i].squeeze(), time_series_recon[i].squeeze(), data_range=1.0))
         metric_list['SSIM'].append(structural_similarity(time_series[i].squeeze(), time_series_recon[i].squeeze(), data_range=1.0))
         metric_list['MSE'].append(mean_squared_error(time_series[i].squeeze(), time_series_recon[i].squeeze()))
 

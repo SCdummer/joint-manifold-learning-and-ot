@@ -101,7 +101,7 @@ class BaseDataset(VisionDataset):
         else:
             raise ValueError('track_idx must be either a string or an integer')
         return list(
-            map(lambda x: self.DEFAULT_TRANSFORM(np.array(Image.open(x), dtype=np.float32)[..., None]), track_images)
+            map(lambda x: self.DEFAULT_TRANSFORM(np.array(Image.open(x))[..., None]), track_images)
         )
 
     def get_tracks_selected(self):

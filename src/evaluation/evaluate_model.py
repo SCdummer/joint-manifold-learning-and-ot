@@ -8,7 +8,7 @@ from src.visualization.create_recon_visualizations import create_time_series_gif
 
 # Import libraries for parsing inputs, for loading things, and for saving things
 import os
-
+import argparse
 import json
 
 # Code related to the datasets that we use
@@ -26,7 +26,7 @@ from src.models.latent_warpers import NeuralODE
 from src.utils.loading_and_saving import load_model
 
 # Import code for calculating (and saving) reconstruction metrics
-from utils import create_summary_statistics, evaluate_time_series_recon
+from .utils import create_summary_statistics, evaluate_time_series_recon
 
 # Import matplotlib for saving things
 import matplotlib.pyplot as plt
@@ -193,15 +193,15 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
     num_time_series = len(dynamic_dataset_input.all_images_per_track)
 
     # Create a dictionary containing the reconstruction values for each time series
-    # if not os.path.isdir(os.path.join(save_dir, 'Static reconstructions')):
-    #     os.mkdir(os.path.join(save_dir, 'Static reconstructions'))
-    # track_metric_vals_static = {list(dynamic_dataset_input.all_images_per_track.keys())[i]:
-    #                                   evaluate_model_on_time_series(encoder, decoder, time_warper,
-    #                                                                 torch.tensor(np.array(dynamic_dataset_input.get_full_track(i))),
-    #                                                                 torch.tensor(np.array(dynamic_dataset_gt.get_full_track(i))),
-    #                                                                 os.path.join(save_dir, 'Static reconstructions'),
-    #                                                                 i, specs["Nabla_t"], specs["NumIntSteps"],
-    #                                                                 'static') for i in range(num_time_series)}
+    if not os.path.isdir(os.path.join(save_dir, 'Static reconstructions')):
+        os.mkdir(os.path.join(save_dir, 'Static reconstructions'))
+    track_metric_vals_static = {list(dynamic_dataset_input.all_images_per_track.keys())[i]:
+                                      evaluate_model_on_time_series(encoder, decoder, time_warper,
+                                                                    torch.tensor(np.array(dynamic_dataset_input.get_full_track(i))),
+                                                                    torch.tensor(np.array(dynamic_dataset_gt.get_full_track(i))),
+                                                                    os.path.join(save_dir, 'Static reconstructions'),
+                                                                    i, specs["Nabla_t"], specs["NumIntSteps"],
+                                                                    'static') for i in range(num_time_series)}
 
     if not os.path.isdir(os.path.join(save_dir, 'Dynamic reconstructions')):
         os.mkdir(os.path.join(save_dir, 'Dynamic reconstructions'))
@@ -259,56 +259,98 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
     #                                     range(num_time_series)}
 
     # Finally, for every metric calculate the average and the standard deviation and save the important values
-    # create_summary_statistics(track_metric_vals_static, os.path.join(save_dir, 'Static reconstructions'))
+    create_summary_statistics(track_metric_vals_static, os.path.join(save_dir, 'Static reconstructions'))
     create_summary_statistics(metrics, os.path.join(save_dir, 'Dynamic reconstructions'))
     # create_summary_statistics(track_metric_vals_train_interval, os.path.join(save_dir, 'One train interval reconstructions'))
 
 
 if __name__ == "__main__":
-    from pathlib import Path
+    # from pathlib import Path
+
+    # torch.random.manual_seed(31359)
+    # np.random.seed(31359)
+
+    # # arg_parser = argparse.ArgumentParser(description="Train")
+    # # arg_parser.add_argument(
+    # #     "--experiment",
+    # #     "-e",
+    # #     dest="experiment_directory",
+    # #     required=True,
+    # #     help="The experiment directory. This directory should include "
+    # #     + "experiment specifications in 'specs.json', and logging will be "
+    # #     + "done in this directory as well.",
+    # # )
+    # #
+    # # args = arg_parser.parse_args()
+
+    # # Get the directory of the current file and via this directory, we go to the main directory
+    # curr_file_dir = os.path.dirname(__file__)
+    # main_dir = os.path.join(curr_file_dir, "..", "..")
+
+    # for experiment_directory in Path(main_dir, 'biem').iterdir():
+    #     if 'Cells' in str(experiment_directory) or 'Gaussian' in str(experiment_directory):
+    #         continue
+
+    #     specs_filename = os.path.join(main_dir, experiment_directory, 'specs.json')
+
+    #     if not os.path.isfile(specs_filename):
+    #         raise Exception(
+    #             "The experiment directory ({}) does not include specifications file "
+    #             + '"specs.json"'.format(experiment_directory)
+    #         )
+
+    #     specs = json.load(open(specs_filename))
+
+    #     save_dir = os.path.join(main_dir, experiment_directory, 'neural_network_reconstructions')
+
+    #     # Evaluation on the training set
+    #     # if not os.path.isdir(os.path.join(save_dir, 'train')):
+    #     #     os.makedirs(os.path.join(save_dir, 'train'))
+    #     # evaluate_model_on_full_dataset(experiment_directory, specs, os.path.join(save_dir, 'train'), split='train')
+
+    #     # Evaluation on the test set
+    #     if not os.path.isdir(os.path.join(save_dir, 'test')):
+    #         os.makedirs(os.path.join(save_dir, 'test'))
+    #     evaluate_model_on_full_dataset(experiment_directory, specs, os.path.join(save_dir, 'test'), split='test')
 
     torch.random.manual_seed(31359)
     np.random.seed(31359)
 
-    # arg_parser = argparse.ArgumentParser(description="Train")
-    # arg_parser.add_argument(
-    #     "--experiment",
-    #     "-e",
-    #     dest="experiment_directory",
-    #     required=True,
-    #     help="The experiment directory. This directory should include "
-    #     + "experiment specifications in 'specs.json', and logging will be "
-    #     + "done in this directory as well.",
-    # )
-    #
-    # args = arg_parser.parse_args()
+    arg_parser = argparse.ArgumentParser(description="Train")
+    arg_parser.add_argument(
+        "--experiment",
+        "-e",
+        dest="experiment_directory",
+        required=True,
+        help="The experiment directory. This directory should include "
+        + "experiment specifications in 'specs.json', and logging will be "
+        + "done in this directory as well.",
+    )
+
+    args = arg_parser.parse_args()
 
     # Get the directory of the current file and via this directory, we go to the main directory
     curr_file_dir = os.path.dirname(__file__)
     main_dir = os.path.join(curr_file_dir, "..", "..")
 
-    for experiment_directory in Path(main_dir, 'Experiments').iterdir():
-        if 'Cells' in str(experiment_directory) or 'Gaussian' in str(experiment_directory):
-            continue
+    specs_filename = os.path.join(main_dir, args.experiment_directory, 'specs.json')
 
-        specs_filename = os.path.join(main_dir, experiment_directory, 'specs.json')
+    if not os.path.isfile(specs_filename):
+        raise Exception(
+            "The experiment directory ({}) does not include specifications file "
+            + '"specs.json"'.format(args.experiment_directory)
+        )
 
-        if not os.path.isfile(specs_filename):
-            raise Exception(
-                "The experiment directory ({}) does not include specifications file "
-                + '"specs.json"'.format(experiment_directory)
-            )
+    specs = json.load(open(specs_filename))
 
-        specs = json.load(open(specs_filename))
+    save_dir = os.path.join(main_dir, args.experiment_directory, 'neural_network_reconstructions')
 
-        save_dir = os.path.join(main_dir, experiment_directory, 'neural_network_reconstructions')
+    # Evaluation on the training set
+    if not os.path.isdir(os.path.join(save_dir, 'train')):
+        os.makedirs(os.path.join(save_dir, 'train'))
+    evaluate_model_on_full_dataset(args.experiment_directory, specs, os.path.join(save_dir, 'train'), split='train')
 
-        # Evaluation on the training set
-        # if not os.path.isdir(os.path.join(save_dir, 'train')):
-        #     os.makedirs(os.path.join(save_dir, 'train'))
-        # evaluate_model_on_full_dataset(experiment_directory, specs, os.path.join(save_dir, 'train'), split='train')
-
-        # Evaluation on the test set
-        if not os.path.isdir(os.path.join(save_dir, 'test')):
-            os.makedirs(os.path.join(save_dir, 'test'))
-        evaluate_model_on_full_dataset(experiment_directory, specs, os.path.join(save_dir, 'test'), split='test')
+    # Evaluation on the test set
+    if not os.path.isdir(os.path.join(save_dir, 'test')):
+        os.makedirs(os.path.join(save_dir, 'test'))
+    evaluate_model_on_full_dataset(args.experiment_directory, specs, os.path.join(save_dir, 'test'), split='test')

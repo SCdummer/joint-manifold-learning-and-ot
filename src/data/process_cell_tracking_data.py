@@ -341,7 +341,7 @@ def process_tracks(data_dir, smooth_and_dilate_mask=False, extension='.png'):
 
 
 if __name__ == "__main__":
-    smooth_and_dilate_mask = False
-    extension = '.png'
+    smooth_and_dilate_mask = True
+    extension = '.tif'
     data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "Fluo-N2DL-HeLa")
     process_tracks(data_dir, smooth_and_dilate_mask, extension)
