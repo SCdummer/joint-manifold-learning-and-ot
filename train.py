@@ -726,6 +726,8 @@ def train_model(experiment_directory):
                 else:
                     barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
                 bary_center_boundaries_normalization_factor = torch.sum(barycenter_boundaries, dim=(2, 3, 4), keepdim=True)
+                bary_center_boundaries_max = barycenter_boundaries.flatten(start_dim=2).max(dim=-1, keepdim=True)[0]
+                
                 barycenter_boundaries = barycenter_boundaries / bary_center_boundaries_normalization_factor
                 barycenter_boundary_left, barycenter_boundary_right = barycenter_boundaries[intval_idx], \
                 barycenter_boundaries[intval_idx + 1]
@@ -763,6 +765,14 @@ def train_model(experiment_directory):
                     scaling = rearrange(scaling, 't b c h w -> (t b) c h w')
                     img_recon_reg_scaled = img_recon_reg
                     barycenters = (barycenters / barycenters.sum(dim=(1, 2, 3))[:, None, None, None]) * scaling
+                elif specs["BarycenterScaling"] == 'max_intensity':
+                    scaling = (bary_center_boundaries_max[intval_idx, ..., None, None] * weights_left[:, None, None, None, None] +
+                               bary_center_boundaries_max[intval_idx + 1, ..., None, None] * weights_right[:, None, None, None, None])
+                    scaling = rearrange(scaling, 't b c h w -> (t b) c h w')
+                    img_recon_reg_scaled = img_recon_reg
+                    barycenters = (barycenters / barycenters.sum(dim=(1, 2, 3))[:, None, None, None])
+                    bary_center_max = barycenters.flatten(start_dim=1).max(dim=-1, keepdim=True)[0][..., None, None]
+                    barycenters = barycenters * scaling / bary_center_max
                 else:
                     raise ValueError("Invalid barycenter scaling")
                 barycenter_loss = recon_loss(img_recon_reg_scaled, barycenters)
