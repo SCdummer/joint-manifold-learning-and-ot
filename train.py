@@ -647,6 +647,10 @@ def train_model(experiment_directory):
                         t_rand = torch.cat([(t_actual[::time_subsampling] + nabla_t * time_subsampling / 2)[:-1],
                                             (t_actual[::time_subsampling] + nabla_t * time_subsampling / 4)[:-1],
                                             (t_actual[::time_subsampling] + nabla_t * time_subsampling * 3 / 4)[:-1]])
+                        
+                        t_rand = torch.cat([(t_actual[::time_subsampling] + (i+1) * nabla_t * time_subsampling / (num_reg_points+1))[:-1] for i in range(num_reg_points)])
+                        
+
                     elif specs["OT_regularizer_type"] == "path_length":
                         t_rand = torch.cat([(t_actual[::time_subsampling] + nabla_t * time_subsampling / 2)[:-1],
                                             (t_actual[::time_subsampling] + nabla_t * time_subsampling / 4)[:-1],
