@@ -672,9 +672,6 @@ def train_model(experiment_directory):
                 t_rand = None
                 t = t_actual
             
-            
-            t_uniq, indices2 = torch.unique(t, return_inverse=True)
-            
             # # OLD
             # t, indices = torch.sort(t)
             # zt = time_warper(z0, t)
