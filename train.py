@@ -644,12 +644,13 @@ def train_model(experiment_directory):
                         t_rand = torch.rand((num_reg_points,), device=t_actual.device) * (end_time - h - 2 * 1e-6) + (h / 2 + 1e-6)
                         t_rand = torch.cat([t_rand - h / 2, t_rand + h / 2])
                     elif specs["OT_regularizer_type"] == "barycenter":
-                        t_rand = torch.cat([(t_actual[::time_subsampling] + nabla_t * time_subsampling / 2)[:-1],
-                                            (t_actual[::time_subsampling] + nabla_t * time_subsampling / 4)[:-1],
-                                            (t_actual[::time_subsampling] + nabla_t * time_subsampling * 3 / 4)[:-1]])
+                        # t_rand = torch.cat([(t_actual[::time_subsampling] + nabla_t * time_subsampling / 2)[:-1],
+                        #                     (t_actual[::time_subsampling] + nabla_t * time_subsampling / 4)[:-1],
+                        #                     (t_actual[::time_subsampling] + nabla_t * time_subsampling * 3 / 4)[:-1]])
                         
                         t_rand = torch.cat([(t_actual[::time_subsampling] + (i+1) * nabla_t * time_subsampling / (num_reg_points+1))[:-1] for i in range(num_reg_points)])
                         
+                        t_rand, _ = torch.sort(t_rand)
 
                     elif specs["OT_regularizer_type"] == "path_length":
                         t_rand = torch.cat([(t_actual[::time_subsampling] + nabla_t * time_subsampling / 2)[:-1],
@@ -670,15 +671,22 @@ def train_model(experiment_directory):
             else:
                 t_rand = None
                 t = t_actual
-            t, indices = torch.sort(t)
-
-            # Latent dynamics
+            
+            
+            t_uniq, indices2 = torch.unique(t, return_inverse=True)
+            
+            # # OLD
+            # t, indices = torch.sort(t)
+            # zt = time_warper(z0, t)
+            # zt_regs = zt[indices >= len(t_actual)]
+            # zt_pred = zt[indices < len(t_actual)]
+            
+            # NEW
+            t, indices_inverse = torch.unique(t, return_inverse=True)
             zt = time_warper(z0, t)
-
-            # One part of the latent codes is used for reconstruction while the other is used for regularization
-            zt_regs = zt[indices >= len(t_actual)]
-            zt_pred = zt[indices < len(t_actual)]
-
+            zt_regs = zt[indices_inverse[t_actual.shape[0]:]]
+            zt_pred = zt[indices_inverse[:t_actual.shape[0]]]
+            
             # We need to subsample in case we use a non-adaptive method
             if not time_warper.adaptive:
                 zt_pred = zt_pred[::(num_int_steps * time_subsampling)]
@@ -745,13 +753,9 @@ def train_model(experiment_directory):
                             nabla_t * time_subsampling)
                 weights_right = 1.0 - weights_left
                 weights = torch.stack([weights_left, weights_right], dim=0)[..., None, None, None, None]
-                print(img_pairs.size())
                 weights = weights.expand(-1, -1, img_pairs.size(2), -1, -1, -1)
-                print(weights.size())
                 img_pairs = rearrange(img_pairs, 'm t b c h w -> m (t b) c h w')
                 weights = rearrange(weights, 'm t b c h w -> m (t b) c h w')
-                print(img_pairs.size())
-                print(weights.size())
 
                 # Calculate the barycenters
                 barycenters = convolutional_barycenter_calculation(img_pairs, weights=weights, scaling=0.95, need_diffable=True)
