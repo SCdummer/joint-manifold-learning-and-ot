@@ -53,7 +53,7 @@ def initialize_optimizers_and_schedulers(encoder, decoder, time_warper, init_lr,
         optimizer_all = torch.optim.Adam(time_warper.parameters(), lr=init_lr)
 
     # Define the scheduler
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer_all, gamma=0.99955)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer_all, gamma=0.9955)
 
     # Return them
     return optimizer_all, scheduler
