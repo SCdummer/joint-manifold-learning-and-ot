@@ -709,7 +709,11 @@ def train_model(experiment_directory):
                 im_recon_loss = torch.tensor(0.0, device=device)
                 dm_loss = recon_loss(xs[num_time_series:], xs_dynamic_preds[num_time_series:])
                 loss_recon = im_recon_loss + lambda_recon_dynamic * dm_loss
-
+                
+            wandb.log({
+                            'xs_dynamic_preds_max': xs_dynamic_preds.max().item(),
+                            'xs_max': xs.max().item()})
+            
             # Make sure the latent vectors of the static reconstruction are equal to the ones of the dynamic reconstruction
             loss_latent_recon = recon_loss(zs_static[num_time_series:, ...], stack_rearrange(zt_pred)[num_time_series:, ...])
 
@@ -775,6 +779,11 @@ def train_model(experiment_directory):
                     barycenters = barycenters * scaling / bary_center_max
                 else:
                     raise ValueError("Invalid barycenter scaling")
+                
+                
+                wandb.log({
+                        'barycenter_max': barycenters.max().item(),
+                    })
                 barycenter_loss = recon_loss(img_recon_reg_scaled, barycenters)
                 # recon_left_bounds = rearrange(img_recon_dynamic, '(t b) c h w -> t b c h w', t=num_time_points)[:-1]
                 # recon_right_bounds = rearrange(img_recon_dynamic, '(t b) c h w -> t b c h w', t=num_time_points)[1:]
