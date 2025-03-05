@@ -640,7 +640,7 @@ def train_model(experiment_directory):
             # Add some random entries to t. Required for calculating regularizers on the time dynamics
             if lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
                 if not use_path_reg:
-                    if specs["OT_regularizer_type"] == "naive" or lambda_motion_ot == 0:
+                    if specs["OT_regularizer_type"] == "naive": # or lambda_motion_ot == 0:
                         t_rand = torch.rand((num_reg_points,), device=t_actual.device) * (end_time - h - 2 * 1e-6) + (h / 2 + 1e-6)
                         t_rand = torch.cat([t_rand - h / 2, t_rand + h / 2])
                     elif specs["OT_regularizer_type"] == "barycenter":
@@ -804,32 +804,82 @@ def train_model(experiment_directory):
                 image_motion_prior_l2 = torch.tensor(0.0, device=device)
             elif lambda_motion_lat > 0 or lambda_motion_l2 > 0 or lambda_motion_ot > 0:
                 if not use_path_reg:
-                    # Get reconstructions used for the regularizer
-                    xs_dynamic_preds = decoder(zt_regs.reshape(-1, latent_dim))
+                    
+                    # OLD CODE: 
+                    # # Get reconstructions used for the regularizer
+                    # xs_dynamic_preds = decoder(zt_regs.reshape(-1, latent_dim))
 
-                    # Get the left hand points and the right hand points for the regularizer
-                    z_t_for_recon_left = zt_pred[:num_reg_points]
-                    z_t_for_recon_right = zt_pred[num_reg_points:]
-                    xs_dynamic_preds_left = xs_dynamic_preds[:(num_reg_points * num_time_series), ...]
-                    xs_dynamic_preds_right = xs_dynamic_preds[(num_reg_points * num_time_series):, ...]
+                    # # Get the left hand points and the right hand points for the regularizer
+                    # z_t_for_recon_left = zt_pred[:num_reg_points]
+                    # z_t_for_recon_right = zt_pred[num_reg_points:]
+                    # xs_dynamic_preds_left = xs_dynamic_preds[:(num_reg_points * num_time_series), ...]
+                    # xs_dynamic_preds_right = xs_dynamic_preds[(num_reg_points * num_time_series):, ...]
 
-                    # Calculate dynamic regularization
+                    # # Calculate dynamic regularization
+                    # if lambda_motion_lat > 0:
+                    #     latent_motion_prior = torch.mean(torch.diff(z_t_for_recon_right - z_t_for_recon_left) ** 2)
+                    # else:
+                    #     latent_motion_prior = torch.tensor(0.0, device=device)
+
+                    # if lambda_motion_l2 > 0:
+                    #     image_motion_prior_l2 = torch.mean((xs_dynamic_preds_right - xs_dynamic_preds_left) ** 2)
+                    # else:
+                    #     image_motion_prior_l2 = torch.tensor(0.0, device=device)
+
+                    # if lambda_motion_ot > 0:
+                    #     image_motion_prior_ot = wasserstein_dist(xs_dynamic_preds_right, xs_dynamic_preds_left)
+                    # else:
+                    #     image_motion_prior_ot = torch.tensor(0.0, device=device)
+                    #     barycenter_loss = torch.tensor(0.0, device=device)
+                    #     wass_loss = torch.tensor(0.0, device=device)
+                    
+                    
+                    img_recon_reg = time_rearrange(decoder(stack_rearrange(zt_regs)), t_rand.shape[0])
+                    # Then for each of the random numbers, we look at the interval it belongs to
+                    intval_idx = torch.floor(t_rand / (nabla_t * time_subsampling)).int()
+
+                    # Get the points where we have data and that correspond to the regularization ones
+                    #barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
+                    if specs["UseGTboundaries"]:
+                        barycenter_boundaries = time_rearrange(xs, n)
+                        zt_boundaries = zt_pred
+                    else:
+                        barycenter_boundaries = time_rearrange(xs_dynamic_preds, n)
+                        zt_boundaries = zt_pred
+
+                    # get the full intervals
+                    zt_regs_full = torch.stack([torch.cat([zt_boundaries[i, ...].unsqueeze(0), zt_regs[intval_idx==i], zt_boundaries[i+1, ...].unsqueeze(0)], dim=0) 
+                                                for i in range(n-1)], dim=0)
+                    xt_regs_full = torch.stack([torch.cat([barycenter_boundaries[i, ...].unsqueeze(0), img_recon_reg[intval_idx==i], barycenter_boundaries[i+1, ...].unsqueeze(0)], dim=0) 
+                                                for i in range(n-1)], dim=0)
+                    
+                    # For each interval
+                    l2_prior = torch.nn.MSELoss(reduction='none')
                     if lambda_motion_lat > 0:
-                        latent_motion_prior = torch.mean(torch.diff(z_t_for_recon_right - z_t_for_recon_left) ** 2)
+                        path_length = torch.sum(
+                            torch.stack([
+                                l2_prior(zt_regs_full[:, i, ...], zt_regs_full[:, i + 1, ...]) for i in range(num_reg_points + 1)
+                            ], dim=0), dim=0
+                        )
+                        latent_motion_prior = torch.mean(path_length)
                     else:
                         latent_motion_prior = torch.tensor(0.0, device=device)
 
                     if lambda_motion_l2 > 0:
-                        image_motion_prior_l2 = torch.mean((xs_dynamic_preds_right - xs_dynamic_preds_left) ** 2)
+                        image_motion_prior_l2 = torch.sum(
+                            torch.stack([
+                                l2_prior(xt_regs_full[:, i, ...], xt_regs_full[:, i + 1, ...]) for i in range(num_reg_points + 1)
+                            ], dim=0), dim=0
+                        )
+                        image_motion_prior_l2 = torch.mean(image_motion_prior_l2)
                     else:
                         image_motion_prior_l2 = torch.tensor(0.0, device=device)
-
-                    if lambda_motion_ot > 0:
-                        image_motion_prior_ot = wasserstein_dist(xs_dynamic_preds_right, xs_dynamic_preds_left)
-                    else:
-                        image_motion_prior_ot = torch.tensor(0.0, device=device)
-                        barycenter_loss = torch.tensor(0.0, device=device)
-                        wass_loss = torch.tensor(0.0, device=device)
+                    
+                    image_motion_prior_ot = torch.tensor(0.0, device=device)
+                    barycenter_loss = torch.tensor(0.0, device=device)
+                    wass_loss = torch.tensor(0.0, device=device)
+                    
+                    
                 else:
                     # print(xt.shape, zt_static.shape)
                     xt_int_endpoints = xt[int_idx:int_idx + 2]
