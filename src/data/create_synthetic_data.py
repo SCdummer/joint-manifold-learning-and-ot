@@ -326,7 +326,7 @@ class LpTimeSeries:
         # Return the derivative
         return dzdt.permute((1, 0))
 
-    def calculate_image_path(self, center0_x, center0_y, side_length0, theta0, m0, p0, num_time_points, nabla_t, noise_stds):
+    def calculate_image_path(self, center0_x, center0_y, side_length0, theta0, m0, p0, num_time_points=50, nabla_t=0.1, noise_stds=[]):
         r"""Given an initial image, calculate a time series path using the defined ODE.
 
         Args:
@@ -356,8 +356,7 @@ class LpTimeSeries:
             shape_imgs (torch tensor of size (num_time_points, N, resolution_x, resolution_y): batch of image time series.
         """
 
-        # Get the time
-        num_time_points = 50
+        # Get the time points
         t = np.linspace(0.0, nabla_t * num_time_points, num_time_points + 1)
 
         # Get the things over time
@@ -941,7 +940,7 @@ def save_squares_latents_and_gifs(name_squares_dataset: str, squares: np.ndarray
             img_obj.save(os.path.join(dirname, save_filename))
 
         # Save the latent vectors defining the images
-        np.save(os.path.join(save_dir, "latents", "Track{}_latent.npy".format(i)), z_t)
+        np.save(os.path.join(save_dir, "latents", "Track{}_latent.npy".format(i)), z_t[:, i, :])
 
         # Finally, save some gifs of the time series
         create_time_series_gif(squares[:, i, ...], os.path.join(save_dir, "gifs"), i)

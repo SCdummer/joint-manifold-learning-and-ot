@@ -50,8 +50,25 @@ class BaseDataset(VisionDataset):
             )
         )
 
+        train_tracks_HeLa = ['Track151', 'Track12', 'Track137', 'Track51', 'Track363', 'Track185', 'Track199', 'Track86', 'Track190', 'Track16', 'Track197', 'Track305', 'Track353', 'Track94', 'Track1', 'Track326', 'Track315', 'Track133', 'Track169', 'Track366', 'Track102', 'Track55', 'Track225', 'Track112', 'Track371', 'Track25', 'Track380', 'Track161', 'Track24', 'Track20', 'Track98', 'Track204', 'Track141', 'Track63', 'Track186', 'Track30', 'Track41']
+        train_tracks_Gaussian = ['Track2', 'Track12', 'Track42', 'Track16', 'Track11', 'Track14', 'Track46', 'Track6', 'Track7', 'Track22', 'Track17', 'Track23', 'Track30', 'Track4', 'Track37', 'Track0', 'Track49', 'Track33', 'Track39', 'Track13', 'Track35', 'Track19', 'Track41', 'Track1', 'Track28', 'Track10', 'Track48', 'Track40', 'Track3', 'Track45', 'Track18', 'Track29', 'Track25', 'Track9', 'Track27', 'Track15', 'Track47', 'Track21', 'Track34', 'Track43']
+        test_tracks_HeLa = ['Track288', 'Track50', 'Track284', 'Track76', 'Track257', 'Track372', 'Track177', 'Track200', 'Track125', 'Track270']
+        test_tracks_Gaussian = ['Track20', 'Track44', 'Track36', 'Track5', 'Track24', 'Track8', 'Track32', 'Track31', 'Track38', 'Track26']
+        tracks_names = [track.name for track in tracks]
+        
         if seed is not None:
-            train_tracks, test_tracks = train_test_split(tracks, random_state=seed, test_size=test_size)
+            
+            if set(train_tracks_HeLa).issubset(tracks_names):
+                train_tracks = [Path(self.root, track) for track in train_tracks_HeLa]
+                test_tracks = [Path(self.root, track) for track in test_tracks_HeLa]
+            else:
+                train_tracks = [Path(self.root, track) for track in train_tracks_Gaussian]
+                test_tracks = [Path(self.root, track) for track in test_tracks_Gaussian]
+                test_tracks = train_tracks+test_tracks
+                test_tracks.sort()
+            
+            #train_tracks, test_tracks = train_test_split(tracks, random_state=seed, test_size=test_size)
+            
             tracks = train_tracks if split == 'train' else test_tracks
 
         self.all_images_per_track = {
@@ -194,51 +211,11 @@ if __name__ == '__main__':
 
     _n_successive = 1
     _ds = HeLaCellsSuccessive(
-        Path('..', '..', 'data'), n_successive=_n_successive, subsampling=5,
-        split='test', test_size=0.2, seed=None, full_time_series=True
+        Path('..', '..', 'data', 'Fluo-N2DL-HeLa', '01_processed'), n_successive=_n_successive, subsampling=5,
+        split='test', test_size=0.2, seed=42, full_time_series=True
     )
 
-    print(_ds.get_tracks_selected())
+    # print(_ds.get_tracks_selected())
+    print([track.name for track in _ds.get_tracks_selected()])
     print(len(_ds.get_full_track(0)))
     print(_ds.get_full_track(0)[0].shape)
-
-    _dl = iter(
-        torch.utils.data.DataLoader(
-            _ds, batch_size=64 // (_n_successive + 1), shuffle=True,
-            # sampler=torch.utils.data.WeightedRandomSampler(
-            #     _ds.get_sampling_weights(), 200, replacement=True
-            # ),
-            collate_fn=_ds.get_collate_fn()
-        )
-    )
-
-    print(repr(_ds))
-
-    mean, std = 0, 0
-    for _i in range(5):
-        _x, _t = next(_dl)
-        mean += torch.mean(_x).item()
-        std += torch.std(_x).item()
-
-        print(_x.shape, _t.shape)
-
-        skipper = _x.size(0) // (_n_successive + 1)
-
-        _x = _x[::skipper]
-        _t = _t[::skipper]
-
-        print(_x.shape, _t.shape)
-
-        _, _ax = plt.subplots(1, _n_successive + 1, figsize=(4 * (_n_successive + 1), 4))
-        if _n_successive == 0:
-            _ax = [_ax]
-        for _i, (_x_i, _t_i) in enumerate(zip(_x, _t)):
-            print(f'Min: {torch.min(_x_i[0])}, Max: {torch.max(_x_i[0])}')
-            _normed_xi = (_x_i[0] - torch.min(_x_i[0])) / (torch.max(_x_i[0]) - torch.min(_x_i[0]))
-            _ax[_i].imshow(_normed_xi, cmap='gray')
-            _ax[_i].set_title(f'{_t_i:.2f}')
-            _ax[_i].axis('off')
-        plt.show()
-        plt.close()
-
-    print(mean / len(_dl), std / len(_dl))

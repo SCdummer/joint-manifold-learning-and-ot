@@ -1,6 +1,6 @@
 # Import libraries and functions required for calculating the barycenters
 import torch
-from wasserstein_barycenters import convolutional_barycenter_calculation
+from .wasserstein_barycenters import convolutional_barycenter_calculation
 
 # Import code used for making visualizations
 from src.visualization.create_recon_visualizations import create_time_series_gif
@@ -11,10 +11,10 @@ import argparse
 import json
 
 # For calculating the reconstruction metrics
-from utils import create_summary_statistics, evaluate_time_series_recon
+from .utils import create_summary_statistics, evaluate_time_series_recon
 
 # Code related to the datasets that we use
-from src.data.datasets import CellData
+from src.data.datasets import HeLaCellsSuccessive
 
 # Remaining libraries
 import numpy as np
