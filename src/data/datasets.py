@@ -9,6 +9,8 @@ from PIL import Image
 from sklearn.model_selection import train_test_split
 from torchvision.datasets import VisionDataset
 
+import json
+
 
 class BaseDataset(VisionDataset):
     DEFAULT_TRANSFORM = T.Compose([
@@ -23,6 +25,7 @@ class BaseDataset(VisionDataset):
         if not self.root.exists():
             # extract the zip file which has the same name as the root folder + '.zip'
             import zipfile
+
             zip_file = self.root.with_suffix('.zip')
             with zipfile.ZipFile(zip_file, 'r') as z:
                 z.extractall(self.root.parent)
@@ -49,27 +52,15 @@ class BaseDataset(VisionDataset):
                 len(list(d.glob(f'*.{self.EXTENSION}'))) for d in tracks
             )
         )
-
-        train_tracks_HeLa = ['Track151', 'Track12', 'Track137', 'Track51', 'Track363', 'Track185', 'Track199', 'Track86', 'Track190', 'Track16', 'Track197', 'Track305', 'Track353', 'Track94', 'Track1', 'Track326', 'Track315', 'Track133', 'Track169', 'Track366', 'Track102', 'Track55', 'Track225', 'Track112', 'Track371', 'Track25', 'Track380', 'Track161', 'Track24', 'Track20', 'Track98', 'Track204', 'Track141', 'Track63', 'Track186', 'Track30', 'Track41']
-        train_tracks_Gaussian = ['Track2', 'Track12', 'Track42', 'Track16', 'Track11', 'Track14', 'Track46', 'Track6', 'Track7', 'Track22', 'Track17', 'Track23', 'Track30', 'Track4', 'Track37', 'Track0', 'Track49', 'Track33', 'Track39', 'Track13', 'Track35', 'Track19', 'Track41', 'Track1', 'Track28', 'Track10', 'Track48', 'Track40', 'Track3', 'Track45', 'Track18', 'Track29', 'Track25', 'Track9', 'Track27', 'Track15', 'Track47', 'Track21', 'Track34', 'Track43']
-        test_tracks_HeLa = ['Track288', 'Track50', 'Track284', 'Track76', 'Track257', 'Track372', 'Track177', 'Track200', 'Track125', 'Track270']
-        test_tracks_Gaussian = ['Track20', 'Track44', 'Track36', 'Track5', 'Track24', 'Track8', 'Track32', 'Track31', 'Track38', 'Track26']
-        tracks_names = [track.name for track in tracks]
         
-        if seed is not None:
-            
-            if set(train_tracks_HeLa).issubset(tracks_names):
-                train_tracks = [Path(self.root, track) for track in train_tracks_HeLa]
-                test_tracks = [Path(self.root, track) for track in test_tracks_HeLa]
-            else:
-                train_tracks = [Path(self.root, track) for track in train_tracks_Gaussian]
-                test_tracks = [Path(self.root, track) for track in test_tracks_Gaussian]
-                test_tracks = train_tracks+test_tracks
-                test_tracks.sort()
-            
-            #train_tracks, test_tracks = train_test_split(tracks, random_state=seed, test_size=test_size)
-            
-            tracks = train_tracks if split == 'train' else test_tracks
+        # Load the specs.json file
+        split_path = self.root / 'split.json'
+        with open(split_path, 'r') as f:
+            split = json.load(f)
+
+        train_tracks = [Path(self.root, track) for track in split["train"]]
+        test_tracks = [Path(self.root, track) for track in split["test"]]
+        tracks = train_tracks if split == "train" else test_tracks
 
         self.all_images_per_track = {
             track: list(sorted(list(track.glob(f'*.{self.EXTENSION}'))))
@@ -207,7 +198,6 @@ class SquaresMovingHorizontallySuccessive(HeLaCellsSuccessive):
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
 
     _n_successive = 1
     _ds = HeLaCellsSuccessive(
