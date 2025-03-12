@@ -1,5 +1,6 @@
 {
-    "DataSource": "data/Small_circle_gaussian_small/images",
+    "DataSource": "data/Fluo-N2DL-HeLa/01_processed/01_processed",
+    "DataSourceTest": "data/Fluo-N2DL-HeLa/01_processed/01_processed",
     "EncoderSpecs": {
         "num_filters": [
             512,
@@ -20,7 +21,8 @@
             128,
             256,
             512
-        ]
+        ],
+        "most_common_val": 0.0
     },
     "TimeWarperSpecs": {
         "hidden_dims": [
@@ -42,20 +44,21 @@
     "JointLearning": true,
     "BatchSizeStatic": 64,
     "BatchSizeDynamic": 16,
-    "LatentDim": 2,
+    "LatentDim": 128,
     "InitLR": 5e-4,
     "SaveFreq": 500,
     "UseWandb": false,
     "Continue": false,
     "h": 0.1,
     "NumRegPoints": 3,
-    "UsePathReg": true,
+    "UsePathReg": false,
     "LambdaReconDynamic": 10.0,
     "LambdaDynRegLat": 0.1,
     "LambdaDynRegL2": 0.0,
     "LambdaDynRegOT": 0.0,
     "LambdaWassLoss": 0.0,
     "DetachBarycenter": false,
-    "OT_regularizer_type": "other",
-    "BarycenterScaling": "avg_intensity"
+    "OT_regularizer_type": "barycenter",
+    "BarycenterScaling": "avg_intensity",
+    "UseGTboundaries": false
 }
