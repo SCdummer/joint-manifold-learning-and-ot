@@ -32,8 +32,9 @@ from .utils import create_summary_statistics, evaluate_time_series_recon
 import matplotlib.pyplot as plt
 
 
-def save_individual_images(time_series_recon, save_dir):
-    max_val = time_series_recon.max()
+def save_individual_images(time_series_recon, save_dir, max_val):
+    if max_val == "time_series":
+        max_val = time_series_recon.max()
     if not os.path.isdir(save_dir):
         os.makedirs(save_dir)
     for i in range(time_series_recon.shape[0]):
@@ -52,7 +53,11 @@ def save_individual_images(time_series_recon, save_dir):
 
 def evaluate_model_on_time_series(encoder, decoder, time_warper, time_series_input, time_series_gt, save_dir, recon_idx,
                                   nabla_t,
-                                  num_int_steps, recon_type='static', time_subsampling=None, n_successive=None):
+                                  num_int_steps, max_val="time_series", recon_type='static', time_subsampling=None, n_successive=None):
+    
+    # Make sure the max_val input is either a fixed float or equal to "time_series"
+    assert isinstance(max_val, float) or max_val == "time_series", "max_val can be a float or is equal to 'time_series'..."
+    
     # Only do encoding-decoding when you want the static reconstructions. Else use time_warper for getting the latents
     if recon_type == 'static':
 
@@ -72,7 +77,7 @@ def evaluate_model_on_time_series(encoder, decoder, time_warper, time_series_inp
 
         # Save the individual images
         save_individual_images(time_series_recon.cpu().detach().numpy(),
-                               os.path.join(save_dir, "Track_{}".format(recon_idx)))
+                               os.path.join(save_dir, "Track_{}".format(recon_idx)), max_val)
 
     elif recon_type == 'dynamic':
 
@@ -101,7 +106,7 @@ def evaluate_model_on_time_series(encoder, decoder, time_warper, time_series_inp
 
         # Save the individual images
         save_individual_images(time_series_recon.cpu().detach().numpy(),
-                               os.path.join(save_dir, "Track_{}".format(recon_idx)))
+                               os.path.join(save_dir, "Track_{}".format(recon_idx)), max_val)
 
         # if encoder latent dimension is 2, we can plot the latent space learnt by the time warper
         latents = z_t.cpu().detach().numpy()
@@ -111,13 +116,15 @@ def evaluate_model_on_time_series(encoder, decoder, time_warper, time_series_inp
             latents = pca.transform(latents)
 
         fig, ax = plt.subplots(figsize=(10, 10))
+        
         # plot the points, and mark with a dot each time point with a small circle and frame number
         for i, (x, y) in enumerate(latents):
             ax.plot(x, y, 'o', markersize=3)
             ax.text(x, y, str(i), fontsize=8)
+        
         # connect the dots
         ax.plot(latents[:, 0], latents[:, 1], 'k-')
-        # ax.set_title('Latent space learnt by the time warper')
+        
         # save the plot with as little white space as possible
         plt.tight_layout()
         _latent_save_dir = os.path.join(save_dir, "Latent_space")
@@ -125,40 +132,11 @@ def evaluate_model_on_time_series(encoder, decoder, time_warper, time_series_inp
             os.makedirs(_latent_save_dir)
         plt.savefig(os.path.join(_latent_save_dir, f"Latent_space_{recon_idx}.png"))
         plt.close('all')
-    else:  # recon_type == 'one_train_interval':
-
-        if time_subsampling is None:
-            raise ValueError("The time_subsampling parameter is needed for one train interval reconstruction...")
-        if n_successive is None:
-            raise ValueError("The n_successive parameter is needed for one train interval reconstruction...")
-
-        images_start = time_series_input[:-(time_subsampling * (n_successive - 1)):time_subsampling]
-        _, z_start, _ = encoder(images_start)
-        end_time = nabla_t * time_subsampling * (n_successive - 1)
-        t = torch.linspace(0.0, end_time, num_int_steps * time_subsampling * (n_successive - 1) + 1)
-        zt = time_warper(z_start.reshape(images_start.size(0), -1), t)
-        images_recon = decoder(zt).reshape(zt.size(0), zt.size(1), 1, images_start.size(-2), images_start.size(-1))
-
-        # Save every sub timeseries
-        for i in range(images_recon.size(1)):
-            recon = images_recon[:, i, ...]
-            gt = time_series_gt[i * time_subsampling: i * time_subsampling + time_subsampling * (n_successive - 1) + 1]
-            if not os.path.isdir(os.path.join(save_dir, "Track {}".format(recon_idx))):
-                os.makedirs(os.path.join(save_dir, "Track {}".format(recon_idx)))
-            create_time_series_gif(gt.cpu().detach().numpy(), recon.cpu().detach().numpy(),
-                                   os.path.join(save_dir, "Track {}".format(recon_idx)), i,
-                                   "IntervalReconstruction")
-
-            # Save the individual images
-            save_individual_images(recon.cpu().detach().numpy(),
-                                   os.path.join(save_dir, "Track {}".format(recon_idx),
-                                                "IntervalReconstruction", "SubTimeSeries_{}".format(i)))
-        metric_list = None
 
     return metric_list, latents if recon_type == 'dynamic' else None
 
 
-def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split='train'):
+def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split='train', max_val="time_series"):
     # Get the latent dimension
     latent_dim = specs["LatentDim"]
 
@@ -201,6 +179,7 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
                                                                     torch.tensor(np.array(dynamic_dataset_gt.get_full_track(i))),
                                                                     os.path.join(save_dir, 'Static reconstructions'),
                                                                     i, specs["Nabla_t"], specs["NumIntSteps"],
+                                                                    max_val,
                                                                     'static') for i in range(num_time_series)}
 
     if not os.path.isdir(os.path.join(save_dir, 'Dynamic reconstructions')):
@@ -213,6 +192,7 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
                 torch.tensor(np.array(dynamic_dataset_gt.get_full_track(i))),
                 os.path.join(save_dir, 'Dynamic reconstructions'),
                 i, specs["Nabla_t"], specs["NumIntSteps"],
+                max_val,
                 'dynamic'
             ) for i in range(num_time_series)
     }
@@ -246,76 +226,12 @@ def evaluate_model_on_full_dataset(experiment_directory, specs, save_dir, split=
     plt.savefig(os.path.join(_save_dir_for_latent, "all_latent_space.png"))
     plt.close('all')
 
-    # if not os.path.isdir(os.path.join(save_dir, 'One train interval reconstructions')):
-    #     os.mkdir(os.path.join(save_dir, 'One train interval reconstructions'))
-    # track_metric_vals_train_interval = {list(dynamic_dataset_input.all_images_per_track.keys())[i]:
-    #                                         evaluate_model_on_time_series(encoder, decoder, time_warper,
-    #                                                                       torch.tensor(np.array(
-    #                                                                           dynamic_dataset_input.get_full_track(i))),
-    #                                                                       torch.tensor(np.array(
-    #                                                                           dynamic_dataset_gt.get_full_track(i))),
-    #                                                                       os.path.join(save_dir,
-    #                                                                                    'One train interval reconstructions'),
-    #                                                                       i, specs["Nabla_t"], specs["NumIntSteps"],
-    #                                                                       'one_train_interval',
-    #                                                                       time_subsampling=specs["TimeSubsampling"],
-    #                                                                       n_successive=specs["N"]) for i in
-    #                                     range(num_time_series)}
-
     # Finally, for every metric calculate the average and the standard deviation and save the important values
     create_summary_statistics(metrics_static, os.path.join(save_dir, 'Static reconstructions'))
     create_summary_statistics(metrics, os.path.join(save_dir, 'Dynamic reconstructions'))
-    # create_summary_statistics(track_metric_vals_train_interval, os.path.join(save_dir, 'One train interval reconstructions'))
-
+    
 
 if __name__ == "__main__":
-    # from pathlib import Path
-
-    # torch.random.manual_seed(31359)
-    # np.random.seed(31359)
-
-    # # arg_parser = argparse.ArgumentParser(description="Train")
-    # # arg_parser.add_argument(
-    # #     "--experiment",
-    # #     "-e",
-    # #     dest="experiment_directory",
-    # #     required=True,
-    # #     help="The experiment directory. This directory should include "
-    # #     + "experiment specifications in 'specs.json', and logging will be "
-    # #     + "done in this directory as well.",
-    # # )
-    # #
-    # # args = arg_parser.parse_args()
-
-    # # Get the directory of the current file and via this directory, we go to the main directory
-    # curr_file_dir = os.path.dirname(__file__)
-    # main_dir = os.path.join(curr_file_dir, "..", "..")
-
-    # for experiment_directory in Path(main_dir, 'biem').iterdir():
-    #     if 'Cells' in str(experiment_directory) or 'Gaussian' in str(experiment_directory):
-    #         continue
-
-    #     specs_filename = os.path.join(main_dir, experiment_directory, 'specs.json')
-
-    #     if not os.path.isfile(specs_filename):
-    #         raise Exception(
-    #             "The experiment directory ({}) does not include specifications file "
-    #             + '"specs.json"'.format(experiment_directory)
-    #         )
-
-    #     specs = json.load(open(specs_filename))
-
-    #     save_dir = os.path.join(main_dir, experiment_directory, 'neural_network_reconstructions')
-
-    #     # Evaluation on the training set
-    #     # if not os.path.isdir(os.path.join(save_dir, 'train')):
-    #     #     os.makedirs(os.path.join(save_dir, 'train'))
-    #     # evaluate_model_on_full_dataset(experiment_directory, specs, os.path.join(save_dir, 'train'), split='train')
-
-    #     # Evaluation on the test set
-    #     if not os.path.isdir(os.path.join(save_dir, 'test')):
-    #         os.makedirs(os.path.join(save_dir, 'test'))
-    #     evaluate_model_on_full_dataset(experiment_directory, specs, os.path.join(save_dir, 'test'), split='test')
 
     torch.random.manual_seed(31359)
     np.random.seed(31359)
@@ -329,6 +245,13 @@ if __name__ == "__main__":
         help="The experiment directory. This directory should include "
         + "experiment specifications in 'specs.json', and logging will be "
         + "done in this directory as well.",
+    )
+    arg_parser.add_argument(
+        "--max_val",
+        "-m",
+        dest="max_val",
+        default="time_series",
+        help="The maximum value that we use for plotting the images (not used in the gifs)",
     )
 
     args = arg_parser.parse_args()
@@ -352,9 +275,9 @@ if __name__ == "__main__":
     # Evaluation on the training set
     if not os.path.isdir(os.path.join(save_dir, 'train')):
         os.makedirs(os.path.join(save_dir, 'train'))
-    evaluate_model_on_full_dataset(args.experiment_directory, specs, os.path.join(save_dir, 'train'), split='train')
+    evaluate_model_on_full_dataset(args.experiment_directory, specs, os.path.join(save_dir, 'train'), split='train', max_val=args.max_val)
 
     # Evaluation on the test set
     if not os.path.isdir(os.path.join(save_dir, 'test')):
         os.makedirs(os.path.join(save_dir, 'test'))
-    evaluate_model_on_full_dataset(args.experiment_directory, specs, os.path.join(save_dir, 'test'), split='test')
+    evaluate_model_on_full_dataset(args.experiment_directory, specs, os.path.join(save_dir, 'test'), split='test', max_val=args.max_val)
