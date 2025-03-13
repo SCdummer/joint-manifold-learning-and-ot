@@ -56,8 +56,12 @@ def evaluate_model_on_time_series(encoder, decoder, time_warper, time_series_inp
                                   num_int_steps, max_val="time_series", recon_type='static', time_subsampling=None, n_successive=None):
     
     # Make sure the max_val input is either a fixed float or equal to "time_series"
-    assert isinstance(max_val, float) or max_val == "time_series", "max_val can be a float or is equal to 'time_series'..."
-    
+    if not (max_val == "time_series"):
+        try: 
+            max_val = float(max_val)
+        except ValueError:
+            print("max_val can be a float or is equal to 'time_series'...")
+
     # Only do encoding-decoding when you want the static reconstructions. Else use time_warper for getting the latents
     if recon_type == 'static':
 
