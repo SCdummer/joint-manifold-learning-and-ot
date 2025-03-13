@@ -398,7 +398,7 @@ def save_gaussians_latents_and_gifs(name_gaussians_dataset: str, gaussians: np.n
     """
 
     # Get the directory where we save the Gaussian images as .tif file
-    save_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "Circle_" + name_gaussians_dataset)
+    save_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", name_gaussians_dataset)
 
     # Create some directories if they do not exist
     if not os.path.isdir(os.path.join(save_dir, "latents")):
@@ -457,7 +457,7 @@ if __name__ == '__main__':
     sigma_y = min(resolution_y, resolution_x) / 8
     amplifier = 20.0 * min(resolution_x, resolution_y) / 128
     use_smooth_function = False
-    name_gaussians_dataset = "Gaussian2"
+    name_gaussians_dataset = "Gaussian"
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)
