@@ -15,6 +15,7 @@ tqdm=4.67.1
 geomloss=0.2.6
 einops=0.8.1
 opencv-python=4.11.0.86
+wandb=0.19.8
 ```
 Optionally, one can create a conda environment that contains the required packages via the supplied `environment.yml` file:
 ```
