@@ -56,10 +56,10 @@ class BaseDataset(VisionDataset):
         # Load the specs.json file
         split_path = self.root / 'split.json'
         with open(split_path, 'r') as f:
-            split = json.load(f)
+            split_json = json.load(f)
 
-        train_tracks = [Path(self.root, track) for track in split["train"]]
-        test_tracks = [Path(self.root, track) for track in split["test"]]
+        train_tracks = [Path(self.root, track) for track in split_json["train"]]
+        test_tracks = [Path(self.root, track) for track in split_json["test"]]
         tracks = train_tracks if split == "train" else test_tracks
 
         self.all_images_per_track = {
