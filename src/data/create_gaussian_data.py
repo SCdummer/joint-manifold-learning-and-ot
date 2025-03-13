@@ -457,7 +457,7 @@ if __name__ == '__main__':
     sigma_y = min(resolution_y, resolution_x) / 8
     amplifier = 20.0 * min(resolution_x, resolution_y) / 128
     use_smooth_function = False
-    name_gaussians_dataset = "Gaussian"
+    name_gaussians_dataset = "Gaussians"
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)
