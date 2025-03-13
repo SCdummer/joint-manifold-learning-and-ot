@@ -434,7 +434,7 @@ if __name__ == '__main__':
     ###########################################################################
 
     # Define the number of time series and the number of time points
-    num_time_series = 10
+    num_time_series = 50
     num_time_points = 50
 
     # Define the resolution in each direction
@@ -457,7 +457,7 @@ if __name__ == '__main__':
     sigma_y = min(resolution_y, resolution_x) / 8
     amplifier = 20.0 * min(resolution_x, resolution_y) / 128
     use_smooth_function = False
-    name_gaussians_dataset = "small_gaussian_large"
+    name_gaussians_dataset = "Gaussian2"
 
     # Define the resolution
     resolution = (resolution_x, resolution_y)

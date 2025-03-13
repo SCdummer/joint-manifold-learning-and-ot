@@ -1,3 +1,9 @@
+'''
+Currently, this .py file is not used for producing the results in the paper.
+It is a generalized version of the create_gaussian_data.py code as it also allows to create images of other p-level sets (instead of the Gaussian 2-level set).
+Moreover, it contains one additional time series that has some limit cycle behavior. 
+'''
+
 import numpy as np
 import torchdiffeq
 import torch

@@ -1,21 +1,22 @@
 # Joint Manifold Learning and Optimal Transport for Dynamic Imaging
-This repository contains the code of the SSVM 2025 paper 'Joint Manifold Learning and Optimal Transport for Dynamic Imaging'. 
+This repository contains the code of the paper 'Joint Manifold Learning and Optimal Transport for Dynamic Imaging'. 
 
 ## Required packages:
 The required packages are:
-- pytorch
-- torchdiffeq
-- tqdm
-- scipy
-- scikit-learn
-- pykeops
-- numpy
-- matplotlib
-- geomloss
-- wandb
-- einops
-
-Optionally ,one can create a conda environment that contains the required packages via the supplied `environment.yml` file:
+```
+python=3.12.2
+pytorch=2.5.1 (cuda 11.8)
+pykeops=2.2.3
+torchdiffeq=0.2.5
+scikit-learn=1.6.1
+scikit-image=0.25.0
+matplotlib=3.10.1
+tqdm=4.67.1
+geomloss=0.2.6
+einops=0.8.1
+opencv-python=4.11.0.86
+```
+Optionally, one can create a conda environment that contains the required packages via the supplied `environment.yml` file:
 ```
 conda env create -f environment.yml
 ```
@@ -24,7 +25,7 @@ conda env create -f environment.yml
 For every experiment, you should create a specific directory where you store a `specs.json` file. The `specs.json` file should contain all the parameters for training. For examples, see the `experiments` folder. 
 
 
-For a given experiment directory 'experiment_directory', you run the experiment by executing:
+For a given experiment directory 'experiment_directory', for instance "Experiments/Cells/OT", you run the experiment by executing:
 
 ```
 python train.py -e experiment_directory
@@ -40,19 +41,19 @@ The datasets should be stored in a subfolder of the `data` folder.
 Examples are given below.
 
 ### Creating/downloading the Gaussian dataset
-One can download our used Gaussian dataset from .... This contains three folders: images (containing the images of the tracks), gifs (containing animations of the ground truth over time), and latents (the 2d variables used to generate each picture). For more information on the 'latent codes', we advise to look at the ... code. 
+One can download our used Gaussian dataset from .... This contains three folders: images (containing the images of the tracks), gifs (containing animations of the ground truth over time), and latents (the 2d variables used to generate each picture). For more information on the 'latent codes', we advise to look at the `src.data.create_gaussian_data.py` code. 
 
 Alternatively, one can create their own Gaussian dataset by running the `src.data.create_squares_data.py` file and modifying the options in the file. 
 
 ### Creating cell image dataset
 Load the zip file from the 
-[Cell Tracking Dataset](http://data.celltrackingchallenge.net/training-datasets/PhC-C2DL-PSC.zip). 
+[Cell Tracking Dataset](http://data.celltrackingchallenge.net/training-datasets/Fluo-N2DL-HeLa.zip). 
 Put this data in the data folder under `Fluo-N2DL-HeLa`.
 Then run the following: 
 ````
 python src/data/process_cell_tracking_data.py
 ````
-This processes and saves the dataset in the subfolder `01_processed` of `Fluo-N2DL-HeLa`. 
+This processes and saves the dataset in the subfolder `01_processed` of `Fluo-N2DL-HeLa`. After this you can remove the initial raw data files from the `Fluo-N2DL-HeLa` folder.
 
 ## Specs.json file options
 - **DataSource**: where the data for training is saved. E.g. "data/Fluo-N2DL-HeLa/01_processed".
@@ -124,7 +125,7 @@ where
 - max_val denotes the maximum value that is used when plotting the images. 
 
 ### `src.evaluation.images_to_matplotlib_pngs.py`
-This code creates png images of the gorund truth data via matplotlib. This might be useful when comparing the reconstruction to the ground truth. 
+This code creates png images of the ground truth data via matplotlib. This might be useful when comparing the reconstruction to the ground truth. 
 The parameters can be changed inside the function itself. 
 
 ## Some final remark

@@ -282,13 +282,6 @@ def process_tracks(data_dir, smooth_and_dilate_mask=False, extension='.png'):
                 track_img_dict[label]['max'] = max(track_img_dict[label]['max'], max([img.max() for img in img_list]))
                 track_img_dict[label]['min'] = min(track_img_dict[label]['min'], min([img.min() for img in img_list]))
 
-    # # Get the minimum and maximum values among all images
-    # absolute_max, absolute_min = -10000000, 1000000000
-    # for label in track_img_dict:
-    #     max_val, min_val = track_img_dict[label]['max'], track_img_dict[label]['min']
-    #     absolute_max = max(absolute_max, max_val)
-    #     absolute_min = min(absolute_min, min_val)
-
     # Now we process the images and save them properly
     use_normalization = True
     for label in track_img_dict:
