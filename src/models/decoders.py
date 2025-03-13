@@ -55,7 +55,6 @@ class Decoder(torch.nn.Module):
         self.output_layer.add_module('act', torch.nn.Sigmoid())
 
     def upsample_vector_to_matrix(self, v):
-        #return v.reshape((-1, *self.upsample_size))
         return v.reshape((-1, self.latent_dim, 1, 1))
 
     def forward(self, x):
@@ -63,8 +62,3 @@ class Decoder(torch.nn.Module):
         x = self.hidden_layer(x)
         out = self.output_layer(x)
         return out
-        # if self.most_common_val == 0.0:
-        #     return out
-        # else:
-        #     out = self.most_common_val + (1.0 - self.most_common_val) * out[:, 0, ...] - self.most_common_val * out[:, 1, ...]
-        #     return out[:, None, ...]
