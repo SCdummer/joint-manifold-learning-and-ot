@@ -1,6 +1,6 @@
 {
-    "DataSource": "data/Circle_small_gaussian_large/images",
-    "DataSourceTest": "data/Circle_small_gaussian_large/images",
+    "DataSource": "data/Gaussians/images",
+    "DataSourceTest": "data/Gaussians/images",
     "EncoderSpecs": {
         "num_filters": [
             512,
@@ -49,16 +49,9 @@
     "SaveFreq": 200,
     "UseWandb": true,
     "Continue": false,
-    "h": 0.1,
     "NumRegPoints": 3,
-    "UsePathReg": false,
     "LambdaReconDynamic": 1.0,
     "LambdaDynRegLat": 0.0,
     "LambdaDynRegL2": 0.0,
-    "LambdaDynRegOT": 1.0,
-    "LambdaWassLoss": 0.001,
-    "DetachBarycenter": false,
-    "OT_regularizer_type": "barycenter",
-    "BarycenterScaling": "avg_intensity",
-    "UseGTboundaries": false
+    "LambdaDynRegOT": 1.0
 }

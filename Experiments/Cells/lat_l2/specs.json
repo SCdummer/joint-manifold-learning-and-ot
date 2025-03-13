@@ -1,6 +1,6 @@
 {
-    "DataSource": "data/Fluo-N2DL-HeLa/01_processed/01_processed",
-    "DataSourceTest": "data/Fluo-N2DL-HeLa/01_processed/01_processed",
+    "DataSource": "data/Fluo-N2DL-HeLa/01_processed",
+    "DataSourceTest": "data/Fluo-N2DL-HeLa/01_processed",
     "EncoderSpecs": {
         "num_filters": [
             512,
@@ -49,16 +49,9 @@
     "SaveFreq": 500,
     "UseWandb": false,
     "Continue": false,
-    "h": 0.1,
     "NumRegPoints": 3,
-    "UsePathReg": false,
     "LambdaReconDynamic": 10.0,
     "LambdaDynRegLat": 0.1,
     "LambdaDynRegL2": 0.0,
-    "LambdaDynRegOT": 0.0,
-    "LambdaWassLoss": 0.0,
-    "DetachBarycenter": false,
-    "OT_regularizer_type": "barycenter",
-    "BarycenterScaling": "avg_intensity",
-    "UseGTboundaries": false
+    "LambdaDynRegOT": 0.0
 }
