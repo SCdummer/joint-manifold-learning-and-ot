@@ -1,0 +1,57 @@
+{
+    "DataSource": "data/Gaussians/images",
+    "DataSourceTest": "data/Gaussians/images",
+    "EncoderSpecs": {
+        "num_filters": [
+            512,
+            256,
+            128,
+            64
+        ],
+        "img_dims": [
+            1,
+            64,
+            64
+        ],
+        "use_vae": false
+    },
+    "DecoderSpecs": {
+        "num_filters": [
+            64,
+            128,
+            256,
+            512
+        ],
+        "most_common_val": 0.0
+    },
+    "TimeWarperSpecs": {
+        "hidden_dims": [
+            512,
+            512,
+            512
+        ],
+        "ode_int_method": "euler",
+        "act": "swish",
+        "adjoint_method": false
+    },
+    "EvalOn": "train",
+    "TimeSubsampling": 5,
+    "NumIntSteps": 1,
+    "N": 4,
+    "Nabla_t": 0.1,
+    "NumEpochsStatic": 500,
+    "NumEpochsDynamic": 500,
+    "JointLearning": true,
+    "BatchSizeStatic": 64,
+    "BatchSizeDynamic": 16,
+    "LatentDim": 2,
+    "InitLR": 3e-4,
+    "SaveFreq": 200,
+    "UseWandb": true,
+    "Continue": false,
+    "NumRegPoints": 3,
+    "LambdaReconDynamic": 1.0,
+    "LambdaDynRegLat": 0.0,
+    "LambdaDynRegL2": 0.0,
+    "LambdaDynRegOT": 1.0
+}
