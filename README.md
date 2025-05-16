@@ -17,7 +17,7 @@ einops=0.8.1
 opencv-python=4.11.0.86
 wandb=0.19.8
 ```
-Optionally, one can create a conda environment called *ImagingInWassSpace* that contains the required packages via the supplied `environment.yml` file:
+Optionally, one can create a conda environment called *JointManOT* that contains the required packages via the supplied `environment.yml` file:
 ```
 conda env create -f environment.yml
 ```
