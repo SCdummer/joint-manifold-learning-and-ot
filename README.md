@@ -76,7 +76,7 @@ This processes and saves the dataset in the subfolder `01_processed` of `Fluo-N2
 - **EvalOn**: on what data we evaluate during training (can be "train" or "val").
 - **TimeSubSampling**: e.g. if the value is 5, we take the images at $t_0$, $t_5$, $t_{10}$, ...
 - **NumIntSteps**: the number of integration steps to go from e.g. $t_0$ to $t_1$ (or from $t_i$ to $t_{i+1}$). This is only relevant for explicit methods such as Euler's method.
-- **Nabla_t**: the actual time between two timepoints. So $t_{i+1}-t_i = $ Nabla_t.
+- **Nabla_t**: the actual time between two timepoints. So $t_{i+1}-t_i=$ Nabla_t.
 - **NumEpochsStatic**: the number of epochs in which we ONLY train the encoder and decoder.
 - **NumEpochsDynamic**: the number of epochs in which we train the neural ode and, optionally, the encoder and decoder.
 - **JointLearning**: whether to learn the encoder and decoder when learning the neural ode.
