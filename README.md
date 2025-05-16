@@ -89,8 +89,8 @@ This processes and saves the dataset in the subfolder `01_processed` of `Fluo-N2
 - **Continue**: when you have saved a previous model, whether to continue from the last saved checkpoint.
 - **LambdaReconDynamic**: we have a static reconstruction and dynamic reconstruction loss. This value is the contant in front of the dynamic reconstruction loss.
 - **NumRegPoints**: for the regularizers we regularize at points in between consecutive training times AFTER subsampling. E.g. if we have *TimeSubSampling* $=5$ and we consider $t_5$ and $t_{10}$, we grab equidistant points in the interval $[t_5, t_{10}]$ and *NumRegPoints* indicates the number of equidistant points to use. 
-- **LambdaDynRegLat**: the constant for $\lVert \frac{d}{dt} z(t) \rVert _2 $ regularization
-- **LambdaDynRegL2**: the constant for $\lVert \frac{d}{dt} D(z(t)) \rVert _2 $ regularization
+- **LambdaDynRegLat**: the constant for $\lVert\frac{d}{dt}z(t)\rVert_2$ regularization
+- **LambdaDynRegL2**: the constant for $\lVert\frac{d}{dt}D(z(t))\rVert_2$ regularization
 - **LambdaDynRegOT**: the constant for OT regularization.
 
 ## Evaluating the trained model
