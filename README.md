@@ -131,14 +131,5 @@ The code has only been tested on Linux. If you encounter problems on Windows, we
 ## Citation
 When using this code, please reference the following paper:
 ```
-@article{zeune2020deep,
-  title={Deep learning of circulating tumour cells},
-  author={Zeune, Leonie L and Boink, Yoeri E and van Dalum, Guus and Nanou, Afroditi and de Wit, Sanne and Andree, Kiki C and Swennenhuis, Joost F and van Gils, Stephan A and Terstappen, Leon WMM and Brune, Christoph},
-  journal={Nature Machine Intelligence},
-  volume={2},
-  number={2},
-  pages={124--133},
-  year={2020},
-  publisher={Nature Publishing Group UK London}
-}
+YET TO ADD
 ```
