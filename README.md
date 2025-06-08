@@ -131,5 +131,12 @@ The code has only been tested on Linux. If you encounter problems on Windows, we
 ## Citation
 When using this code, please reference the following paper:
 ```
-YET TO ADD
+@inproceedings{dummer2025joint,
+  title={Joint Manifold Learning and Optimal Transport for Dynamic Imaging},
+  author={Dummer, Sven and Vaish, Puru and Brune, Christoph},
+  booktitle={International Conference on Scale Space and Variational Methods in Computer Vision},
+  pages={400--411},
+  year={2025},
+  organization={Springer}
+}
 ```
